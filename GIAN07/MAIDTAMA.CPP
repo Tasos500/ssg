@@ -110,7 +110,7 @@ void MaidTamaSet(void)
 	}
 
 	// ボムの発動条件を満たしていれば、発動! //
-	if((Key_Data&KEY_BOMB) && Viv.bomb_time==0 /*&& Viv.muteki==0*/
+	if((Key_Data&KEY_BOMB || Viv.tamahit) && Viv.bomb_time==0 /*&& Viv.muteki==0*/
 		&& Viv.bomb && SclInfo.MsgFlag==FALSE)
 	{
 		//if(Viv.weapon == 0) EnterBombPalette();

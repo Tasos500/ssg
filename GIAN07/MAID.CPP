@@ -355,8 +355,7 @@ extern void MaidMove(void)
 			fragment_set(Viv.x,Viv.y,FRG_FATCIRCLE);
 			SndPlay(SOUND_ID_DEAD);
 		}
-		Viv.deathbomb--;
-		if (Viv.deathbomb <= 0){
+		if (!Viv.bomb){
 			Viv.tamahit = 0;
 			MaidDead();
 		}
