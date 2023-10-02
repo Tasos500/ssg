@@ -8,7 +8,7 @@
 #include "GIAN.H"
 #include "LEVEL.H"
 #include "GIAN07/entity.h"
-#include "DirectXUTYs/DS_UTY.H"
+#include "platform/snd.h"
 
 /*
  * ECLコマンドのアドレス更新には ECL_CmdLen[ECLコマンド定数] を使用する
@@ -207,7 +207,7 @@ extern void enemy_clear(void)
 			e->hp    = 0;
 			e->count = 0;
 			if(e->LLaserRef) LLaserForceClose(e);	// レーザーの強制クローズ
-			SndPlayEX(SOUND_ID_BOMB,e->x,0);
+			SndPlay(SOUND_ID_BOMB, e->x);
 		}
 		else{
 			// 描画しないタイプの敵の消去の仕方は他の場合と異なり、 //
@@ -235,8 +235,7 @@ void enemyind_set(void)
 	EnemyNow = 0;
 }
 
-// 敵にダメージを与える //
-extern BOOL enemy_damage(int x,int y,int damage)
+bool enemy_damage(int x,int y,int damage)
 {
 	int				i;
 
@@ -249,7 +248,7 @@ extern BOOL enemy_damage(int x,int y,int damage)
 			else{
 				e->IsDamaged = ((e->count) & 1);
 				if(e->hp<=damage){
-					SndPlayEX(SOUND_ID_BOMB,e->x,0);
+					SndPlay(SOUND_ID_BOMB, e->x);
 					if(e->LLaserRef) LLaserForceClose(e);	// レーザーの強制クローズ
 					PowerUp((BYTE)e->hp);			// パワーアップ
 					e->hp    = 0;
@@ -259,7 +258,7 @@ extern BOOL enemy_damage(int x,int y,int damage)
 					if(e->item) ItemSet(e->x,e->y,e->item);
 				}
 				else{
-					SndPlayEX(SOUND_ID_HIT,e->x,0);
+					SndPlay(SOUND_ID_HIT, e->x);
 					PowerUp(damage);	// ここでもパワーアップ
 					e->hp -= damage;
 				}
@@ -272,8 +271,7 @@ extern BOOL enemy_damage(int x,int y,int damage)
 	return FALSE;
 }
 
-// ｙ上方向無限Ver.敵にダメージを与える //
-extern BOOL enemy_damage2(int x,int y,int damage)
+bool enemy_damage2(int x,int y,int damage)
 {
 	int				i;
 	BOOL			ret_val = FALSE;
@@ -287,7 +285,7 @@ extern BOOL enemy_damage2(int x,int y,int damage)
 			else{
 				e->IsDamaged = ((e->count) & 1);
 				if(e->hp<=damage){
-					SndPlayEX(SOUND_ID_BOMB,e->x,0);
+					SndPlay(SOUND_ID_BOMB, e->x);
 					if(e->LLaserRef) LLaserForceClose(e);	// レーザーの強制クローズ
 					PowerUp((BYTE)e->hp);			// パワーアップ
 					e->hp    = 0;
@@ -297,7 +295,7 @@ extern BOOL enemy_damage2(int x,int y,int damage)
 					if(e->item) ItemSet(e->x,e->y,e->item);
 				}
 				else{
-					SndPlayEX(SOUND_ID_HIT,e->x,0);
+					SndPlay(SOUND_ID_HIT, e->x);
 					PowerUp(damage);	// ここでもパワーアップ
 					e->hp -= damage;
 				}
@@ -326,7 +324,7 @@ extern VOID enemy_damage3(int x,int y,BYTE d)
 			else{
 				e->IsDamaged = ((e->count) & 1);
 				if(e->hp<=damage){
-					SndPlayEX(SOUND_ID_BOMB,e->x,0);
+					SndPlay(SOUND_ID_BOMB, e->x);
 					if(e->LLaserRef) LLaserForceClose(e);	// レーザーの強制クローズ
 					PowerUp((BYTE)e->hp);			// パワーアップ
 					e->hp    = 0;
@@ -336,7 +334,7 @@ extern VOID enemy_damage3(int x,int y,BYTE d)
 					if(e->item) ItemSet(e->x,e->y,e->item);
 				}
 				else{
-					SndPlayEX(SOUND_ID_HIT,e->x,0);
+					SndPlay(SOUND_ID_HIT, e->x);
 					PowerUp(damage);	// ここでもパワーアップ
 					e->hp -= damage;
 				}
@@ -360,7 +358,7 @@ extern void enemy_damage4(int damage)
 			else{
 				e->IsDamaged = ((e->count) & 1);
 				if(e->hp<=damage){
-					SndPlayEX(SOUND_ID_BOMB,e->x,0);
+					SndPlay(SOUND_ID_BOMB, e->x);
 					if(e->LLaserRef) LLaserForceClose(e);	// レーザーの強制クローズ
 					PowerUp((BYTE)e->hp);			// パワーアップ
 					e->hp    = 0;
@@ -370,7 +368,7 @@ extern void enemy_damage4(int damage)
 					if(e->item) ItemSet(e->x,e->y,e->item);
 				}
 				else{
-					SndPlayEX(SOUND_ID_HIT,e->x,0);
+					SndPlay(SOUND_ID_HIT, e->x);
 					PowerUp(damage);	// ここでもパワーアップ
 					e->hp -= damage;
 				}
@@ -385,7 +383,7 @@ extern void enemy_damage4(int damage)
 
 
 // 敵データを初期化する(x,y は x64 で指定のこと) //
-extern void InitEnemyDataX64(ENEMY_DATA *e,int x,int y,DWORD EclID)
+void InitEnemyDataX64(ENEMY_DATA *e, int x, int y, uint32_t EclID)
 {
 	e->x = x;
 	e->y = y;
@@ -453,7 +451,7 @@ extern void InitEnemyDataX64(ENEMY_DATA *e,int x,int y,DWORD EclID)
 
 
 // 強制的に ECL ブロック間を移動する //
-extern void EnemyECL_LongJump(ENEMY_DATA *e, DWORD EclID)
+void EnemyECL_LongJump(ENEMY_DATA *e, uint32_t EclID)
 {
 	e->cmd = (*(DWORD *)(&ECL_Head[EclID]));
 
@@ -466,7 +464,7 @@ extern void EnemyECL_LongJump(ENEMY_DATA *e, DWORD EclID)
 
 
 // 敵データを初期化する(x,y は非x64(ランダム可能) で指定のこと) //
-extern void InitEnemyDataSTD(ENEMY_DATA *e,short x,short y,DWORD EclID)
+void InitEnemyDataSTD(ENEMY_DATA *e, short x, short y, uint32_t EclID)
 {
 	int		EnemyX = x;
 	int		EnemyY = y;
@@ -1603,7 +1601,7 @@ void parse_ECL(ENEMY_DATA *e)
 
 		case(ECL_PSE):			// 効果音を鳴らす
 			ECL_DEBUG("ECL_PSE",0);
-			SndPlayEX(cmd[1],e->x,0);
+			SndPlay(cmd[1], e->x);
 			bRetFlag = FALSE;
 		break;
 

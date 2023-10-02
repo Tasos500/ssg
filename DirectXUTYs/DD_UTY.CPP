@@ -6,11 +6,36 @@
 #include "DD_UTY.H"
 #include "DD_GRP2D.H"					// ２Ｄ用描画関数(公開しないこと)
 #include "DD_GRP3D.H"					// ３Ｄ用描画関数(公開しないこと)
+#include "game/input.h"
+#include "game/screenshot.h"
 #include <assert.h>
 #include <d3d.h>
 #include <stdio.h>
 #pragma message(PBGWIN_DD_UTY_H)
 
+#pragma comment(lib, "ddraw.lib")
+#pragma comment(lib, "dxguid.lib")
+#pragma comment(lib, "user32.lib")
+
+#if   DIRECTDRAW_VERSION == 0x0700
+	#pragma message("      DirectDraw  : Version 7.00")
+#elif DIRECTDRAW_VERSION == 0x0600
+	#pragma message("      DirectDraw  : Version 6.00")
+#elif DIRECTDRAW_VERSION == 0x0500
+	#pragma message("      DirectDraw  : Version 5.00")
+#elif DIRECTDRAW_VERSION == 0x0300
+	#pragma message("      DirectDraw  : Version 3.00")
+#endif
+
+
+// マクロ //
+void RELEASE(auto*& x)
+{
+	if(x != nullptr) {
+		x->Release();
+		x = nullptr;
+	}
+}
 
 // 図形描画関数に対するダミー関数 //
 static void DM_V(void);
@@ -28,8 +53,6 @@ int CLIP_Y_MIN = 0;
 int CLIP_X_MAX = 639;
 int CLIP_Y_MAX = 479;
 
-// キャプチャーを行うか(->MtoB) //
-BOOL CaptureFlag = FALSE;
 bool STD_GrpBlt(PIXEL_LTRB *src, int x, int y, SURFACE_DDRAW& surf);
 
 
@@ -100,11 +123,11 @@ void DDrawRetryUntilSuccessful(GRAPHICS_DDRAW& dxobj, auto action)
 }
 
 
-bool GrpEnum(HWND hWnd)
+bool GrpEnum(void)
 {
 	HRESULT		dxret;
 
-	ZEROMEM(DxEnum);
+	ZeroMemory(DxEnum, sizeof(DxEnum));
 	DxEnumNow = 0;
 
 	try{
@@ -120,7 +143,8 @@ bool GrpEnum(HWND hWnd)
 		return FALSE;
 	}
 
-	DxObj.hWnd = hWnd;
+	extern HWND hWndMain;
+	DxObj.hWnd = hWndMain;
 
 #ifdef _DEBUG
 	DebugOut("正常に列挙できたの");
@@ -134,7 +158,6 @@ bool GRAPHICS_DDRAW::Init(uint8_t& device_id, BITDEPTH& bitdepth)
 	HRESULT				dxret;
 	LPDIRECTDRAW		lpDD  = NULL;
 	DDSURFACEDESC		ddsd;
-	DDSCAPS				ddscaps;
 //	D3DMATERIAL			mat;
 //	D3DMATERIALHANDLE	hmat;
 
@@ -168,8 +191,7 @@ bool GRAPHICS_DDRAW::Init(uint8_t& device_id, BITDEPTH& bitdepth)
 	}
 
 	Cleanup();
-	ZEROMEM(ddsd);
-	ZEROMEM(ddscaps);
+	ZeroMemory(&ddsd, sizeof(ddsd));
 
 	try{
 		dxret = DirectDrawCreate(pXDD.lpDDGuid, &lpDD, nullptr);
@@ -198,7 +220,7 @@ bool GRAPHICS_DDRAW::Init(uint8_t& device_id, BITDEPTH& bitdepth)
 		if(dxret!=DD_OK) throw("CreateSurface(Prim) に失敗");
 
 		// BackBuffer へのポインタを Get //
-		ddscaps.dwCaps = DDSCAPS_BACKBUFFER;
+		DDSCAPS ddscaps = { .dwCaps = DDSCAPS_BACKBUFFER };
 		dxret = Prim->GetAttachedSurface(&ddscaps, &Back);
 		if(dxret!=DD_OK) throw("GetAttachedSurface に失敗");
 
@@ -399,7 +421,7 @@ bool GRAPHICS_DDRAW::SurfaceCreateUninitialized(
 	RELEASE(surf.surf);
 	surf.size = { 0, 0 };
 
-	ZEROMEM(ddsd);
+	ZeroMemory(&ddsd, sizeof(ddsd));
 
 	ddsd.dwSize         = sizeof(ddsd);
 	ddsd.dwWidth        = size.w;
@@ -514,9 +536,9 @@ void GrpClsEx(const std::optional<WINDOW_LTRB>& Target, DWORD col)
 
 static void GrpFlipFS(void)
 {
-	// キャプチャーフラグが有効かつ、キャプチャー要求が出ていれば画像を取り込む //
-	if(CaptureFlag && (GetAsyncKeyState(VK_SNAPSHOT)&0x8000))
-		PutSurfaceToBmp(DxObj.Back);
+	if(SystemKey_Data & SYSKEY_SNAPSHOT) {
+		DDrawSaveSurface(ScreenshotNextStream().get(), DxObj.Back);
+	}
 
 	// パレットを変更する必要があれば、変更だ //
 	if(DxObj.bNeedChgPal && DxObj.PixelFormat.IsPalettized()){
@@ -530,9 +552,9 @@ static void GrpFlipFS(void)
 
 static void GrpFlipWnd(void)
 {
-	// キャプチャーフラグが有効かつ、キャプチャー要求が出ていれば画像を取り込む //
-	if(CaptureFlag && (GetAsyncKeyState(VK_SNAPSHOT)&0x8000))
-		PutSurfaceToBmp(DxObj.Back);
+	if(SystemKey_Data & SYSKEY_SNAPSHOT) {
+		DDrawSaveSurface(ScreenshotNextStream().get(), DxObj.Back);
+	}
 
 	DDrawRetryUntilSuccessful(DxObj, [&] {
 		return DxObj.Prim->Blt(nullptr, DxObj.Back, nullptr, 0, nullptr);
@@ -608,7 +630,8 @@ bool GRAPHICS_DDRAW::SurfaceSetColorKeyFromFirstPixel(SURFACE_DDRAW& surf)
 	DDCOLORKEY				key;
 
 	// Lock する //
-	ZEROMEM(ddsd);ddsd.dwSize = sizeof(ddsd);
+	ZeroMemory(&ddsd, sizeof(ddsd));
+	ddsd.dwSize = sizeof(ddsd);
 	if(surf.surf->Lock(nullptr, &ddsd, DDLOCK_WAIT, nullptr) != DD_OK) {
 		return false;
 	}
@@ -742,7 +765,7 @@ static bool CreateZbuffer(const XD3DENUM& D3De)
 		return true;
 	}
 
-	ZEROMEM(ddsd);
+	ZeroMemory(&ddsd, sizeof(ddsd));
 
 	mem_flag = (D3De.bIsHW ? DDSCAPS_VIDEOMEMORY : DDSCAPS_SYSTEMMEMORY);
 	ddsd.dwSize = sizeof(ddsd);
@@ -773,8 +796,8 @@ static BOOL FAR __stdcall DriverEnum(GUID FAR *lpGUID,LPSTR lpDDesc,LPSTR lpDNam
 	if(DirectDrawCreate(lpGUID,&lpDD,NULL)!=DD_OK) return DDENUMRET_OK;
 
 	// ドライバの能力取得 //
-	ZEROMEM(DriverCaps);	DriverCaps.dwSize = sizeof(DDCAPS);
-	ZEROMEM(HelCaps);		HelCaps.dwSize    = sizeof(DDCAPS);
+	ZeroMemory(&DriverCaps, sizeof(DDCAPS)); DriverCaps.dwSize = sizeof(DDCAPS);
+	ZeroMemory(&HelCaps, sizeof(DDCAPS));    HelCaps.dwSize    = sizeof(DDCAPS);
 
 	if(lpDD->GetCaps(&DriverCaps,&HelCaps)==DD_OK){
 		// ２Ｄでサポートしている解像度をチェック(色数だが...) //

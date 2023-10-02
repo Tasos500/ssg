@@ -50,7 +50,7 @@ public:
 	}
 
 	BIT_DEVICE_READ(const void* mem,size_t size) :
-		buffer({ reinterpret_cast<const uint8_t *>(mem), size }) {
+		buffer({ static_cast<const uint8_t *>(mem), size }) {
 	}
 
 	// Returns 0xFF if we're at the end of the stream.
@@ -83,7 +83,7 @@ struct PACKFILE_READ {
 	const BYTE_BUFFER_OWNED packfile;
 	const std::span<const PBG_FILEINFO> info;
 
-	PACKFILE_READ(std::nullptr_t null = nullptr) {
+	PACKFILE_READ(std::nullptr_t null = nullptr) noexcept {
 	}
 
 	PACKFILE_READ(

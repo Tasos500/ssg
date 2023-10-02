@@ -27,9 +27,9 @@ struct created_splits {
 		return created_splits();
 	}
 
-	template <class... Args>
-	created_splits(Args&&... args) : spaces({ std::forward<Args>(args)... }) {
-		count = sizeof...(Args);
+	template <class... Args> created_splits(Args&&... args) noexcept :
+		count(sizeof...(Args)),
+		spaces({ std::forward<Args>(args)... }) {
 	}
 
 	explicit operator bool() const {
@@ -86,8 +86,8 @@ created_splits insert_and_split(const PIXEL_SIZE& nw, const PIXEL_LTWH& sp)
 	// This is why, if we had more of width remaining than we had of height,
 	// we split along the vertical axis, and if we had more of height remaining
 	// than we had of width, we split along the horizontal axis.
-	PIXEL_LTWH bigger_split;
-	PIXEL_LTWH lesser_split;
+	[[gsl::suppress(type.5)]] PIXEL_LTWH bigger_split;
+	[[gsl::suppress(type.5)]] PIXEL_LTWH lesser_split;
 	if(free_w > free_h) {
 		bigger_split = { (sp.left + nw.w), sp.top, free_w, sp.h };
 		lesser_split = { sp.left, (sp.top + nw.h), nw.w, free_h };
@@ -104,7 +104,7 @@ PIXEL_LTWH TEXTRENDER_PACKED::Insert(const PIXEL_SIZE& subrect_size)
 
 	assert(subrect_size);
 	for(int i = static_cast<int>(spaces.size()) - 1; i >= 0; --i) {
-		const auto candidate = spaces[i];
+		const PIXEL_LTWH candidate = spaces[i];
 
 		if(!closest || (
 			(candidate.w * candidate.h) < (closest->w * closest->h)
@@ -178,7 +178,7 @@ PIXEL_LTWH TEXTRENDER_PACKED::Subrect(
 TEXTRENDER_RECT_ID TEXTRENDER_PACKED::Register(const PIXEL_SIZE& size)
 {
 	rects.emplace_back(Insert(size));
-	return TEXTRENDER_RECT_ID(rects.size() - 1);
+	return static_cast<TEXTRENDER_RECT_ID>(rects.size() - 1);
 }
 
 bool TEXTRENDER_PACKED::Wipe()

@@ -16,7 +16,7 @@ class SURFACE_GDI : public SURFACE {
 public:
 	// Required for unselecting [img] prior to deleting it. Could have probably
 	// been `static`, but let's keep it correct for now.
-	HGDIOBJ stock_img;
+	HGDIOBJ stock_img = nullptr;
 
 	// Source bitmap data, if any.
 	HBITMAP img = nullptr;
@@ -24,7 +24,7 @@ public:
 	// Always has any valid [img] selected into it.
 	HDC dc;
 
-	SURFACE_GDI();
+	SURFACE_GDI() noexcept;
 	SURFACE_GDI(const SURFACE_GDI&) = delete;
 	SURFACE_GDI& operator=(const SURFACE_GDI&) = delete;
 	~SURFACE_GDI();
@@ -32,8 +32,8 @@ public:
 	// Calls Delete() and reinitializes [img].
 	bool Load(BMP_OWNED bmp);
 
-	// Saves [img] to a .BMP file with the given name.
-	bool Save(const PATH_LITERAL s) const;
+	// Saves [img] as a .BMP file to the given stream.
+	bool Save(FILE_STREAM_WRITE*) const;
 
-	void Delete();
+	void Delete() noexcept;
 };

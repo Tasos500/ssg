@@ -7,9 +7,9 @@
 #include "platform/file.h"
 #include <assert.h>
 
-uint16_t BMPPaletteSizeFromBPP(uint8_t bpp)
+constexpr uint16_t BMPPaletteSizeFromBPP(uint8_t bpp)
 {
-	auto ret = [bpp]() -> uint16_t {
+	const auto ret = [bpp]() -> uint16_t {
 		if(bpp <= 4) {
 			return (1 << 4);
 		} else if(bpp <= 8) {
@@ -60,7 +60,7 @@ std::optional<BMP_OWNED> BMPLoad(BYTE_BUFFER_OWNED buffer)
 		assert(!"Needs a palette, but doesn't contain a full one?");
 		return std::nullopt;
 	}
-	auto& palette = maybe_palette.value();
+	auto palette = maybe_palette.value();
 
 	// [header_info.biSizeImage] can be 0, so we have to manually calculate the
 	// actual size allocated by CreateDIBSection() by DWORD-aligning the row
@@ -75,13 +75,13 @@ std::optional<BMP_OWNED> BMPLoad(BYTE_BUFFER_OWNED buffer)
 		assert(!"Does not contain all pixels?");
 		return std::nullopt;
 	}
-	auto& pixels = maybe_pixels.value();
+	auto pixels = maybe_pixels.value();
 
 	return BMP_OWNED{ std::move(buffer), header_info, palette, pixels };
 }
 
 bool BMPSave(
-	const PATH_LITERAL s,
+	FILE_STREAM_WRITE* stream,
 	PIXEL_SIZE size,
 	uint16_t planes,
 	uint16_t bpp,
@@ -89,7 +89,7 @@ bool BMPSave(
 	std::span<const std::byte> pixels
 )
 {
-	BMP_INFOHEADER header_info = {
+	const BMP_INFOHEADER header_info = {
 		.biSize = sizeof(BMP_INFOHEADER),
 		.biWidth = size.w,
 		.biHeight = size.h,
@@ -109,8 +109,6 @@ bool BMPSave(
 		.bfReserved2 = 0,
 		.bfOffBits = pixel_offset,
 	};
-	auto stream = FileStreamWrite(s);
-	assert(stream);
 	return (
 		stream &&
 		stream->Write(header_file) &&

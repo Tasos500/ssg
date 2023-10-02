@@ -34,7 +34,7 @@ struct BYTE_BUFFER_BORROWED : public std::span<const uint8_t> {
 		BYTE_BUFFER_BORROWED(std::span<const T>{ val.data(), val.size() }) {
 	}
 
-	BYTE_BUFFER_BORROWED(const std::string_view str) :
+	BYTE_BUFFER_BORROWED(const std::string_view str) noexcept :
 		span({ reinterpret_cast<const uint8_t *>(str.data()), str.length() }) {
 	}
 };
@@ -56,7 +56,7 @@ template <
 	template <typename T> std::optional<std::span<transfer_const<T>>> next(
 		size_t n = 1
 	) {
-		auto cursor_new = (cursor + (sizeof(T) * n));
+		const auto cursor_new = (cursor + (sizeof(T) * n));
 		if((cursor_new > this->size()) || (cursor_new < cursor)) {
 			return std::nullopt;
 		}
@@ -76,7 +76,7 @@ private:
 
 public:
 	// Creates an empty buffer, with no allocation.
-	BYTE_BUFFER_OWNED(std::nullptr_t null = nullptr) :
+	BYTE_BUFFER_OWNED(std::nullptr_t null = nullptr) noexcept :
 		std::unique_ptr<uint8_t[]>(null),
 		size_(0) {
 	}
@@ -84,7 +84,7 @@ public:
 	// Tries to allocate [size] bytes, and leaves the buffer empty on failure.
 	BYTE_BUFFER_OWNED(size_t size) :
 		std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[size]),
-		size_(!this ? 0 : size) {
+		size_(get() ? size : 0) {
 	}
 
 	auto size() const {

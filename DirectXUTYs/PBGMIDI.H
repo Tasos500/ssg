@@ -17,7 +17,7 @@
 
 #include <windows.h>
 #include <mmsystem.h>
-//#pragma comment(lib,"winmm.lib")
+#include "platform/buffer.h"
 
 
 #define MIDFN_NOPLAY	0x00	// 再生しない

@@ -6,7 +6,6 @@
 #include "DD_UTY.H"
 #include "DD_GRP2D.H"
 #include "DD_CLIP2D.H"		// 図形クリッピング用関数群
-#include "D2_Polygon.H"		// ポリゴン描画
 #include <ddraw.h>
 
 #pragma message(PBGWIN_DD_GRP2D_H)
@@ -22,8 +21,8 @@ typedef struct tagAlphaInfo {
 // ２Ｄ用変数 //
 BYTE				*Grp_Vram;				// これは公開しない
 long				Grp_Pitch = 0;			// これも公開しない
-DWORD				Grp_AddrY[480];			// Ｙ座標テーブル
-DWORD				Col2D;					// 現在の色 x ４バイト分
+uint32_t	Grp_AddrY[480];	// Ｙ座標テーブル
+uint32_t	Col2D;	// 現在の色 x ４バイト分
 BYTE				Col2D_R;				// 赤(α用)
 BYTE				Col2D_G;				// 緑(α用)
 BYTE				Col2D_B;				// 青(α用)
@@ -260,37 +259,7 @@ void _2DPolygonA(WINDOW_POINT *p, int n)
 // 横ラインを引く //
 static void _2DGrpHline(int x1, int x2, int y)
 {
-	_asm{
-		PUSH EDI			// EDI 保存
-
-		MOV EDI,Grp_Vram
-		JZ  HL_END			// NULL チェック(高速化のために外すかぁ？)
-
-		LEA EBX,Grp_AddrY
-		MOV EAX,y			// EAX = y
-		SHL EAX,2			// EAX = y*4 (DWORD)
-		ADD EBX,EAX			// EBX = Grp_AddrY+y(DD) <Pointer>
-		MOV EAX,[EBX]		// EAX = Grp_AddrY[y]
-
-		ADD EDI,EAX			// EDI := Vram + Grp_AddrY[y]
-		MOV EBX,x1			// EBX := x1
-		MOV ECX,x2			// ECX := x2
-		SUB ECX,EBX			// ECX := x2 - x1
-		ADD EDI,EBX			// EDI := Vram + Grp_AddrY[y] + x1(EBX)
-		INC ECX				// ECX := x2 - x1 + 1 (Length)
-		MOV EBX,ECX			// EBX := x2 - x1 + 1
-		AND EBX,3			// EBX := (x2-x1 +1)%4
-		SHR ECX,2			// ECX := (x2-x1 +1)/4
-
-		MOV EAX,Col2D
-
-		REP STOSD			// DWORD 描画 (４の倍数で描ける範囲で)
-		MOV ECX,EBX			// ECX := (x2-x1 +1)%4
-		REP STOSB			// BYTE 描画 (残りを描き込む)
-
-HL_END:
-		POP EDI				// EDI 復元
-	}
+	memset((Grp_Vram + Grp_AddrY[y] + x1), Col2D, ((x2 - x1) + 1));
 }
 
 // 横ラインを引く(ｸﾘｯﾋﾟﾝｸﾞ有り) //

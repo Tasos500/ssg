@@ -8,7 +8,7 @@
 //#pragma message(PBGWIN_DEMOPLAY_H)
 
 #include "CONFIG.H"
-#include "DirectXUTYs/DX_TYPE.H"
+#include "game/input.h"
 
 
 ///// [ 定数 ] /////
@@ -49,28 +49,25 @@ typedef struct tagDEMOPLAY_INFO{
 
 ///// [ 関数 ] /////
 void DemoplayInit(void);	// デモプレイデータの準備
-void DemoplayRecord(uint16_t key);	// デモプレイデータを保存する
-void DemoplaySave(void);	// デモプレイデータをファイルに書き込む
 
-bool DemoplayLoad(int stage);	// デモプレイデータをロードする
-uint16_t DemoplayMove(void);	// Key_Data を返す
-void DemoplayLoadCleanup(void);	// デモプレイロードの事後処理
+// デモプレイデータを保存する
+// Returns `true` if the replay is over and should be saved via either
+// DemoplaySave() or ReplaySave().
+bool DemoplayRecord(INPUT_BITS key);
 
+void DemoplaySaveDemo(void);	// デモプレイデータをファイルに書き込む
+void DemoplaySaveReplay(void);	// リプレイデータをファイルに書き込む
 
-// 要望に付き、追加するのだ //
-void ReplayInit(void);	// リプレイデータの準備
-void ReplayRecord(uint16_t key);	// リプレイデータを保存する
-void ReplaySave(void);	// リプレイデータをファイルに書き込む
-
-bool ReplayLoad(int stage);	// リプレイデータをロードする
-uint16_t ReplayMove(void);	// Key_Data を返す
-void ReplayLoadCleanup(void);	// リプレイデータロードの事後処理
+bool DemoplayLoadDemo(int stage);	// デモプレイデータをロードする
+bool DemoplayLoadReplay(int stage);	// リプレイデータをロードする
+INPUT_BITS DemoplayMove(void);	// Key_Data を返す
+void DemoplayCleanup(void);	// デモプレイロードの事後処理
 
 
 
 ///// [ 変数 ] /////
-extern BOOL DemoplaySaveEnable;		// デモプレイのセーブが動作しているか
-extern BOOL DemoplayLoadEnable;		// デモプレイのロードが動作しているか
+extern bool DemoplaySaveEnable;	// デモプレイのセーブが動作しているか
+extern bool DemoplayLoadEnable;	// デモプレイのロードが動作しているか
 
 
 #endif

@@ -20,7 +20,7 @@ To build:
 
 1. Open Visual Studio's *x64_x86 Cross Tools Command Prompt*.
 2. Navigate to the checkout directory of this repository.
-3. Invoke `tup` in your way of choice:
+3. Invoke `build.bat` in your way of choice:
    * If you use Visual Studio Code, open the editor from this command-line environment:
 
      ```batch
@@ -29,16 +29,17 @@ To build:
 
      Then, you can run the build task with the default `Ctrl-Shift-B` keybinding.
 
-   * Or you can always run `tup` directly from this shell.
+   * Or you can always run `build.bat` directly from this shell.
 
 The binary will be put into the `bin/` subdirectory, where you can also place the game's original data files.
 
 By default, both Debug and Release configurations are built.
-If you only need one of them and want to speed up the build process, you can deactivate either one by creating a file named `tup.config` in the root directory of this repository:
+If you only need one of them and want to speed up the build process, you can pick a single one by creating a file named `tup.config` in the root directory of this repository:
 
 ```sh
-CONFIG_DEBUG=n   # deactivates Debug mode if present
-CONFIG_RELEASE=n # deactivates Release mode if present
+CONFIG_BUILDTYPE=debug   # builds only in Debug mode
+CONFIG_BUILDTYPE=release # builds only in Release mode
+CONFIG_BUILDTYPE=        # builds in both modes
 ```
 
 ## Debugging

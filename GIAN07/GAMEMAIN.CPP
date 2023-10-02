@@ -11,18 +11,17 @@
 #include "LEVEL.H"
 #include "MUSIC.H"
 #include "SCORE.H"
-#include "DirectXUTYs/DI_UTY.H"
-#include "DirectXUTYs/DS_UTY.H"
 #include "DirectXUTYs/PBGMIDI.H"
+#include "platform/snd.h"
+#include "game/input.h"
 
 
-extern HWND hWndMain;
 DWORD		DrawCount = 0;
 DWORD		MidiPlayID = 0;
 char		MidiTempo  = 0;
 DWORD		DemoTimer  = 0;
 BYTE		WeaponKeyWait = 0;
-DWORD		GameOverTimer = 0;
+int	GameOverTimer = 0;
 
 decltype(CONFIG_DATA::GameLevel.v) TempGameLevel = 0;
 
@@ -32,26 +31,26 @@ BYTE			CurrentDif;		// 現在の難易度(スコアネーム表示用)
 
 MAID		VivTemp;
 
-BOOL IsDemoplay = FALSE;
+bool IsDemoplay = false;
 
 
-void TitleProc(void);
-void WeaponSelectProc(void);	// 装備選択
-void GameProc(void);
-void GameOverProc0(void);	// ゲームオーバー出現用
-void GameOverProc(void);	// ゲームオーバー
-void PauseProc(void);
-void MusicRoomProc(void);	// 音楽室
-void DemoProc(void);	// デモプレイ
-void NameRegistProc(void);	// お名前入力
+void TitleProc(bool& quit);
+void WeaponSelectProc(bool&);	// 装備選択
+void GameProc(bool&);
+void GameOverProc0(bool&);	// ゲームオーバー出現用
+void GameOverProc(bool&);	// ゲームオーバー
+void PauseProc(bool&);
+void MusicRoomProc(bool&);	// 音楽室
+void DemoProc(bool&);	// デモプレイ
+void NameRegistProc(bool&);	// お名前入力
 
-void ReplayProc(void);
+void ReplayProc(bool&);
 
 
 bool SProjectInit(void);	// 西方Ｐｒｏｊｅｃｔ初期化部
-void SProjectProc(void);	// 西方Ｐｒｏｊｅｃｔ表示動作部
+void SProjectProc(bool&);	// 西方Ｐｒｏｊｅｃｔ表示動作部
 
-void ScoreNameProc(void);
+void ScoreNameProc(bool&);
 
 void GameSTD_Init(void);	// ゲームを立ち上げる際に必ず行う初期化関数群
 bool DemoInit(void);	// デモプレイの初期化を行う
@@ -62,7 +61,7 @@ bool IsDraw(void);
 
 void ScoreDraw(void);	// スコアの描画
 
-void(*GameMain)(void) = TitleProc;
+void(*GameMain)(bool& quit) = TitleProc;
 
 uint8_t CurrentLevel()
 {
@@ -71,6 +70,7 @@ uint8_t CurrentLevel()
 	);
 }
 
+bool InputLocked;
 
 
 // スコアネーム表示の準備を行う //
@@ -92,23 +92,22 @@ extern bool ScoreNameInit(void)
 
 	GrpSetClip(0,0,640,480);
 
-	Key_Read();
-	while(Key_Data) Key_Read();
-
+	InputLocked = Key_Data;
 	GameMain = ScoreNameProc;
 
 	return TRUE;
 }
 
 // スコアネームの表示 //
-void ScoreNameProc(void)
+void ScoreNameProc(bool&)
 {
 	static const char *ExString[5] = {"Easy","Normal","Hard","Lunatic","Extra"};
 
-	Key_Read();
-
 	switch(Key_Data){
 		case(KEY_RETURN):case(KEY_TAMA):case(KEY_BOMB):case(KEY_ESC):
+			if(InputLocked) {
+				break;
+			}
 			SndPlay(SOUND_ID_CANCEL);
 			GameExit(FALSE);
 		return;
@@ -126,6 +125,10 @@ void ScoreNameProc(void)
 			CurrentDif  = (CurrentDif+1)%5;
 			CurrentRank = (BYTE)SetScoreString(NULL, CurrentDif);
 		break;
+
+		case 0:
+			InputLocked = false;
+			break;
 	}
 
 	GrpCls();
@@ -235,19 +238,19 @@ char GetAddr2Char(int x, int y)
 }
 
 // お名前入力 //
-void NameRegistProc(void)
+void NameRegistProc(bool&)
 {
 	// <- DemoInit() を修正するのだぞ
 	PIXEL_LTRB	src = {0, 0, 400, 64};
 	int		gx,gy,len;
 	static int	x,y;
-	static BYTE key_time;
+	static int8_t key_time;
 	static BYTE count;
 	static BYTE time;
 	//char	buf[100],
 	char	c;
 
-	Key_Read();
+	constexpr int8_t END_WAIT = -1;
 
 	if(key_time==0){
 		key_time = 8;//16;
@@ -280,6 +283,9 @@ void NameRegistProc(void)
 			goto BACK_NR_PROC;
 
 			case(KEY_TAMA):case(KEY_RETURN):
+				if(InputLocked) {
+					break;
+				}
 				SndPlay(SOUND_ID_SELECT);
 
 				// 最後の文字まで来ていた場合 //
@@ -330,22 +336,34 @@ void NameRegistProc(void)
 				ScoreString[CurrentRank-1].Name[NR_NAME_LEN-1] = '\0';
 
 				strcpy(CurrentName.Name, ScoreString[CurrentRank-1].Name);
-				SaveScoreData(&CurrentName, CurrentLevel());
+				// SaveScoreData(&CurrentName, CurrentLevel());
 
-				while(Key_Data) Key_Read();
-				x = y = key_time = 0;
-				GameExit();
-			return;
+				key_time = END_WAIT;
+				break;
+
+			case 0:
+				InputLocked = false;
+				break;
 		}
 
 		if(x>20 && y==2)	x &= (~1);
+	} else if(key_time != END_WAIT) {
+		key_time--;
 	}
-	else key_time--;
 
-	if(Key_Data==0) key_time = 0;
-
-	count = (count+1)%24;
-	time++;
+	if(key_time == -1) {
+		if(Key_Data == 0) {
+			x = y = key_time = 0;
+			GameExit();
+			return;
+		}
+	} else {
+		if(Key_Data == 0) {
+			key_time = 0;
+		}
+		count = ((count + 1) % 24);
+		time++;
+	}
 
 	GrpCls();
 
@@ -426,6 +444,7 @@ bool NameRegistInit(bool bNeedChgMusic)
 
 	GrpSetClip(0,0,640,480);
 
+	InputLocked = Key_Data;
 	GameMain = NameRegistProc;
 
 	if(bNeedChgMusic){
@@ -502,7 +521,7 @@ bool WeaponSelectInit(bool ExStg)
 	return TRUE;
 }
 
-bool GameInit(void(*NextProc)(void))
+bool GameInit(void(*NextProc)(bool& quit))
 {
 	TextObj.Clear();
 	if(NextProc != DemoProc) {
@@ -532,7 +551,7 @@ bool GameInit(void(*NextProc)(void))
 extern bool GameNextStage(void)
 {
 #ifdef PBG_DEBUG
-	DemoplaySave();
+	DemoplaySaveDemo();
 #endif
 
 	GameStage++;
@@ -566,7 +585,7 @@ extern bool GameReplayInit(int Stage)
 //	rnd_seed_set(timeGetTime());
 	GameStage = Stage;
 
-	if(!ReplayLoad(GameStage)){
+	if(!DemoplayLoadReplay(GameStage)) {
 		//DebugOut("デモプレイデータが存在せず");
 		return FALSE;
 	}
@@ -579,12 +598,12 @@ extern bool GameReplayInit(int Stage)
 
 	if(!LoadGraph(GameStage)){
 		DebugOut("GRAPH.DAT が破壊されています");
-		ReplayLoadCleanup();
+		DemoplayCleanup();
 		return FALSE;
 	}
 	if(!LoadStageData(GameStage)){
 		DebugOut("ENEMY.DAT が破壊されています");
-		ReplayLoadCleanup();
+		DemoplayCleanup();
 		return FALSE;
 	}
 
@@ -595,20 +614,20 @@ extern bool GameReplayInit(int Stage)
 	return GameInit(ReplayProc);
 }
 
-void ReplayProc(void)
+void ReplayProc(bool&)
 {
 	static BYTE ExTimer;
 	PIXEL_LTRB	rc;
 
 	ExTimer = (ExTimer+1)%128;
 
-	Key_Read();
-	if(Key_Data==KEY_ESC) Key_Data = KEY_ESC;
-	else         Key_Data = ReplayMove();
+	if(Key_Data != KEY_ESC) {
+		Key_Data = DemoplayMove();
+	}
 
 	// ＥＳＣが押されたら即、終了 //
 	if(Key_Data & KEY_ESC){
-		ReplayLoadCleanup();
+		DemoplayCleanup();
 		GameExit();
 		return;
 	}
@@ -616,7 +635,7 @@ void ReplayProc(void)
 	GameMove();
 
 	if(GameMain != ReplayProc){
-		ReplayLoadCleanup();		// 後始末
+		DemoplayCleanup();	// 後始末
 		GameExit();					// 強制終了させる(ゲームオーバー対策)
 		return;
 	}
@@ -658,7 +677,7 @@ bool DemoInit(void)
 //	GameStage = (rnd()%3)+1;		// この部分は体験版(コミケ)だけ //
 //	GameStage = 1;					// こっちはＨＰ体験版用         //
 
-	if(!DemoplayLoad(GameStage)){
+	if(!DemoplayLoadDemo(GameStage)) {
 		//DebugOut("デモプレイデータが存在せず");
 		return FALSE;
 	}
@@ -685,7 +704,7 @@ void FadeoutPalette(const PALETTE& Src, uint8_t a)
 // 西方Ｐｒｏｊｅｃｔ表示動作部 //
 std::optional<LensInfo> Lens;
 
-void SProjectProc(void)
+void SProjectProc(bool&)
 {
 	static WORD timer = 0;
 
@@ -889,22 +908,22 @@ extern void GameContinue(void)
 	}
 }
 
-void GameProc(void)
+void GameProc(bool&)
 {
-	Key_Read();
-
 #ifdef PBG_DEBUG
-	if(DebugDat.DemoSave) DemoplayRecord(Key_Data);
+	if(DebugDat.DemoSave && DemoplayRecord(Key_Data)) {
+		DemoplaySaveDemo();
+	}
 #endif
 
 	// リプレイ時の保存処理 //
-	if(ConfigDat.StageSelect.v) {
-		ReplayRecord(Key_Data);
+	if(ConfigDat.StageSelect.v && DemoplayRecord(Key_Data)) {
+		DemoplaySaveReplay();
 	}
 
 	if(Key_Data & KEY_ESC){
 		if(ConfigDat.StageSelect.v) {
-			ReplaySave();
+			DemoplaySaveReplay();
 			GameExit(TRUE);
 			return;
 		}
@@ -939,18 +958,31 @@ void GameProc(void)
 }
 
 // ゲームオーバー出現用
-void GameOverProc0(void)
+void GameOverProc0(bool&)
 {
-	GameOverTimer--;
+	switch(GameOverTimer) {
+	default:
+		GameOverTimer--;
+		fragment_move();
+		SEffectMove();
+		break;
 
-	if(GameOverTimer == 0){
-		Key_Data = 0;
-		while(Key_Data == 0) Key_Read();
-		while(Key_Data != 0) Key_Read();
+	case 0:
+		// Wait for press
+		if(Key_Data != 0) {
+			GameOverTimer--;
+		}
+		break;
+
+	case -1:
+		// Wait for release
+		if(Key_Data != 0) {
+			break;
+		}
 
 		// ステージセレクトが有効な場合 //
 		if(ConfigDat.StageSelect.v) {
-			ReplaySave();
+			DemoplaySaveReplay();
 			if(GameStage == GRAPH_ID_EXSTAGE) NameRegistInit(TRUE);
 			else                              GameExit(TRUE);
 			return;
@@ -966,10 +998,6 @@ void GameOverProc0(void)
 		GameMain = GameOverProc;
 		return;
 	}
-	else{
-		fragment_move();
-		SEffectMove();
-	}
 
 	if(IsDraw()){
 		GameDraw();
@@ -978,9 +1006,8 @@ void GameOverProc0(void)
 }
 
 // ゲームオーバー
-void GameOverProc(void)
+void GameOverProc(bool&)
 {
-	Key_Read();
 	CWinMove(&ContinueWindow);
 	if(GameMain != GameOverProc){
 		SEffectInit();
@@ -1000,13 +1027,12 @@ void GameOverProc(void)
 }
 
 // デモプレイ
-void DemoProc(void)
+void DemoProc(bool&)
 {
 	static BYTE ExTimer;
 
 	ExTimer = (ExTimer+1)%128;
 
-	Key_Read();
 	if(Key_Data) Key_Data = KEY_ESC;
 	else         Key_Data = DemoplayMove();
 
@@ -1014,7 +1040,7 @@ void DemoProc(void)
 
 	// ＥＳＣが押されたら即、終了 //
 	if(Key_Data & KEY_ESC){
-		DemoplayLoadCleanup();
+		DemoplayCleanup();
 		IsDemoplay = FALSE;
 		GameExit();
 		return;
@@ -1023,7 +1049,7 @@ void DemoProc(void)
 	GameMove();
 
 	if(GameMain != DemoProc){
-		DemoplayLoadCleanup();		// 後始末
+		DemoplayCleanup();	// 後始末
 		IsDemoplay = FALSE;
 		GameExit();					// 強制終了させる(ゲームオーバー対策)
 		return;
@@ -1037,7 +1063,7 @@ void DemoProc(void)
 }
 
 // 装備選択 //
-void WeaponSelectProc(void)
+void WeaponSelectProc(bool&)
 {
 	PIXEL_LTRB	rc;
 	int		i,x,y;
@@ -1067,7 +1093,6 @@ void WeaponSelectProc(void)
 		SndPlay(SOUND_ID_BUZZ);
 	}
 
-	Key_Read();
 	if(WeaponKeyWait){
 		if(!Key_Data) WeaponKeyWait = 0;
 		else          Key_Data      = 0;
@@ -1120,7 +1145,7 @@ void WeaponSelectProc(void)
 					GameStage = ConfigDat.StageSelect.v;
 					if(GameStage==2) Viv.exp = 160;
 					if(GameStage>=3) Viv.exp = 255;
-					ReplayInit();
+					DemoplayInit();
 				}
 				else{
 					GameStage = 1;
@@ -1132,7 +1157,7 @@ void WeaponSelectProc(void)
 				Viv.left   = 2;
 				Viv.exp    = 255;
 				if(ConfigDat.StageSelect.v) {
-					ReplayInit();
+					DemoplayInit();
 				}
 			}
 
@@ -1261,7 +1286,7 @@ void WeaponSelectProc(void)
 }
 
 
-void TitleProc(void)
+void TitleProc(bool& quit)
 {
 	PIXEL_LTRB	src = { 0, 0, 640, 396 };
 	//PIXEL_LTRB	src = { 0, 0, 350, 403 };
@@ -1270,12 +1295,14 @@ void TitleProc(void)
 
 /*
 	// 鳩プロテクト? //
-	if((GetAsyncKeyState(VK_F1) & 0x80000000)
-		&& (GetAsyncKeyState(VK_F10) & 0x8000000))
-		PostMessage(hWndMain,WM_SYSCOMMAND,SC_CLOSE,0);
+	if(
+		(GetAsyncKeyState(VK_F1) & 0x80000000) &&
+		(GetAsyncKeyState(VK_F10) & 0x8000000)
+	) {
+		quit = true;
+	}
 */
 
-	Key_Read();
 	if(Key_Data==0) DemoTimer += 1;
 	else            DemoTimer  = 0;
 	if(MainWindow.SelectDepth!=0) DemoTimer = 0;
@@ -1297,9 +1324,7 @@ void TitleProc(void)
 			return;
 
 			default:
-				// DestroyWindow->PostMessage
-				// タスクバーにアイコンが残るのを防止だっけ？
-				PostMessage(hWndMain,WM_SYSCOMMAND,SC_CLOSE,0);
+				quit = true;
 			return;
 		}
 	}
@@ -1318,11 +1343,9 @@ void TitleProc(void)
 	}
 }
 
-void PauseProc(void)
+void PauseProc(bool&)
 {
 	WINDOW_LTRB	rc;
-
-	Key_Read();
 
 	CWinMove(&ExitWindow);
 	if(GameMain!=PauseProc) return;
@@ -1340,7 +1363,7 @@ void PauseProc(void)
 }
 
 // 音楽室 //
-void MusicRoomProc(void)
+void MusicRoomProc(bool&)
 {
 	PIXEL_LTRB	src;
 	char	buf[100];
@@ -1348,8 +1371,6 @@ void MusicRoomProc(void)
 	int		i;
 	static WORD Old_Key;
 	static BYTE DevChgWait;
-
-	Key_Read();
 
 	if(Key_Data!=Old_Key){
 		switch(Key_Data){
@@ -1389,9 +1410,11 @@ void MusicRoomProc(void)
 		break;
 	}
 
-	if(GetAsyncKeyState('F')&0x8000) Mid_FadeOut(120);
+	if(SystemKey_Data & SYSKEY_BGM_FADE) {
+		Mid_FadeOut(120);
+	}
 
-	if(GetAsyncKeyState('D')&0x8000){
+	if(SystemKey_Data & SYSKEY_BGM_DEVICE) {
 		if(DevChgWait==0){
 			Mid_ChgDev(1);
 			if(MusicRoomText) {

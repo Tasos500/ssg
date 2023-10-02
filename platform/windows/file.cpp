@@ -6,6 +6,7 @@
 #define WIN32_LEAN_AND_MEAN
 
 #include "platform/file.h"
+#include <assert.h>
 #include <windows.h>
 
 static HANDLE OpenRead(const PATH_LITERAL s)
@@ -28,7 +29,7 @@ static HANDLE OpenWrite(const PATH_LITERAL s, DWORD disposition)
 
 static size_t HandleRead(std::span<uint8_t> buf, HANDLE handle)
 {
-	DWORD bytes_read;
+	[[gsl::suppress(type.5)]] DWORD bytes_read;
 	if((handle == INVALID_HANDLE_VALUE) || !ReadFile(
 		handle, buf.data(), buf.size_bytes(), &bytes_read, nullptr
 	)) {
@@ -39,7 +40,7 @@ static size_t HandleRead(std::span<uint8_t> buf, HANDLE handle)
 
 static bool HandleWrite(HANDLE handle, const BYTE_BUFFER_BORROWED buf)
 {
-	DWORD bytes_written;
+	[[gsl::suppress(type.5)]] DWORD bytes_written;
 	if((handle == INVALID_HANDLE_VALUE) || !WriteFile(
 		handle, buf.data(), buf.size_bytes(), &bytes_written, nullptr
 	)) {
@@ -50,7 +51,7 @@ static bool HandleWrite(HANDLE handle, const BYTE_BUFFER_BORROWED buf)
 
 static size_t LoadInplace(std::span<uint8_t> buf, HANDLE&& handle)
 {
-	auto ret = HandleRead(buf, handle);
+	const auto ret = HandleRead(buf, handle);
 	CloseHandle(handle);
 	return ret;
 }
@@ -59,7 +60,7 @@ static bool WriteAndClose(
 	HANDLE&& handle, std::span<const BYTE_BUFFER_BORROWED> bufs
 )
 {
-	auto ret = [&]() {
+	const auto ret = [&]() {
 		for(const auto& buf : bufs) {
 			if(!HandleWrite(handle, buf)) {
 				return false;
@@ -102,7 +103,7 @@ BYTE_BUFFER_OWNED FileLoad(const PATH_LITERAL s, size_t size_limit)
 		return {};
 	}
 
-	return std::move(buf);
+	return buf;
 }
 
 bool FileWrite(const PATH_LITERAL s, std::span<const BYTE_BUFFER_BORROWED> bufs)
@@ -131,21 +132,16 @@ struct FILE_STREAM_WIN32 : public FILE_STREAM_WRITE {
 public:
 	FILE_STREAM_WIN32(HANDLE handle) :
 		handle(handle) {
+		assert(handle != INVALID_HANDLE_VALUE);
 	}
 
 	~FILE_STREAM_WIN32() {
-		if(*this) {
-			CloseHandle(handle);
-		}
+		CloseHandle(handle);
 	}
 
-	explicit operator bool() override {
-		return (handle != INVALID_HANDLE_VALUE);
-	};
-
 	bool Seek(int64_t offset, SEEK_WHENCE whence) override {
-		DWORD origin;
-		LARGE_INTEGER offset_large = { .QuadPart = offset };
+		DWORD origin = FILE_BEGIN;
+		const LARGE_INTEGER offset_large = { .QuadPart = offset };
 		switch(whence) {
 		case SEEK_WHENCE::BEGIN:  	origin = FILE_BEGIN;  	break;
 		case SEEK_WHENCE::CURRENT:	origin = FILE_CURRENT;	break;
@@ -155,7 +151,7 @@ public:
 	};
 
 	std::optional<int64_t> Tell() override {
-		LARGE_INTEGER ret;
+		[[gsl::suppress(type.5)]] LARGE_INTEGER ret;
 		if(!SetFilePointerEx(handle, { 0 }, &ret, FILE_CURRENT)) {
 			return std::nullopt;
 		}
@@ -167,10 +163,16 @@ public:
 	};
 };
 
-std::unique_ptr<FILE_STREAM_WRITE> FileStreamWrite(const PATH_LITERAL s)
+std::unique_ptr<FILE_STREAM_WRITE> FileStreamWrite(
+	const PATH_LITERAL s, bool fail_if_exists
+)
 {
+	auto handle = OpenWrite(s, (fail_if_exists ? CREATE_NEW : CREATE_ALWAYS));
+	if(handle == INVALID_HANDLE_VALUE) {
+		return nullptr;
+	}
 	return std::unique_ptr<FILE_STREAM_WIN32>(
-		new (std::nothrow) FILE_STREAM_WIN32(OpenWrite(s, CREATE_ALWAYS))
+		new (std::nothrow) FILE_STREAM_WIN32(handle)
 	);
 }
 // -------

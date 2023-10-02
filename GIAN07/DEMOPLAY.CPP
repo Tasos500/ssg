@@ -7,13 +7,13 @@
 #include "LZ_UTY.H"
 #include "GIAN.H"
 #include "DEMOPLAY.H"
-#include "DirectXUTYs/DI_UTY.H"
+#include "game/input.h"
 
 
-BOOL			DemoplaySaveEnable = FALSE;		// デモプレイのセーブが動作しているか
-BOOL			DemoplayLoadEnable = FALSE;		// デモプレイのロードが動作しているか
+bool	DemoplaySaveEnable = false;	// デモプレイのセーブが動作しているか
+bool	DemoplayLoadEnable = false;	// デモプレイのロードが動作しているか
 DEMOPLAY_INFO	DemoInfo;						// デモプレイ情報
-WORD			DemoBuffer[DEMOBUF_MAX];		// デモプレイ用バッファ
+INPUT_BITS	DemoBuffer[DEMOBUF_MAX];	// デモプレイ用バッファ
 DWORD			DemoBufPtr;						// デモプレイ用バッファPtr(Ｃのそれではない)
 CONFIG_DATA		ConfigTemp;						// コンフィグのデータ一時保存用
 
@@ -32,7 +32,6 @@ PATH_STRING ReplayFN(uint8_t stage)
 	return ret;
 }
 
-// デモプレイデータの準備 //
 void DemoplayInit(void)
 {
 	// 乱数の準備 //
@@ -77,36 +76,36 @@ bool DemoplayLoadSetup()
 }
 
 
-// デモプレイデータを保存する //
-void DemoplayRecord(uint16_t key)
+bool DemoplayRecord(INPUT_BITS key)
 {
-	if(!DemoplaySaveEnable) return;
+	if(!DemoplaySaveEnable) {
+		return false;
+	}
 
 	DemoBuffer[DemoBufPtr++] = key;
 
 	// バッファが最後に来たか、ＥＳＣが押された場合 //
 	if(DemoBufPtr==DEMOBUF_MAX || (key&KEY_ESC)){
 		DemoBufPtr--;
-		DemoplaySave();
-		DemoplaySaveEnable = FALSE;
+		return true;
 	}
+	return false;
 }
 
 
-// デモプレイデータをファイルに書き込む //
-void DemoplaySave(void)
+void DemoplaySaveDemo(void)
 {
 	if(!DemoplaySaveEnable) return;
 
 	DemoBuffer[DemoBufPtr] = KEY_ESC;
 	DemoInfo.DataSize = DemoBufPtr+1;
 
-	PATH_CODEPOINT fn[] = _PATH("STG_Demo.DAT");
+	PATH_CODEUNIT fn[] = _PATH("STG_Demo.DAT");
 	fn[3] = ('0' + GameStage);
 
 	const std::array<BYTE_BUFFER_BORROWED, 2> bufs = {
 		DemoInfo,
-		std::span<WORD>{ DemoBuffer, (DemoBufPtr + 1) },
+		std::span<INPUT_BITS>{ DemoBuffer, (DemoBufPtr + 1) },
 	};
 	FileWrite(fn, std::span<const BYTE_BUFFER_BORROWED>{ bufs });
 
@@ -114,8 +113,7 @@ void DemoplaySave(void)
 }
 
 
-// デモプレイデータをロードする //
-bool DemoplayLoad(int stage)
+bool DemoplayLoadDemo(int stage)
 {
 	// Not too pretty… //
 	BYTE_BUFFER_OWNED DATEnemyLoad(fil_no_t filno);
@@ -135,15 +133,14 @@ bool DemoplayLoad(int stage)
 		if(!maybe_inputs) {
 			return false;
 		}
-		const auto& inputs = maybe_inputs.value();
+		const auto inputs = maybe_inputs.value();
 		memcpy(DemoBuffer, inputs.data(), inputs.size_bytes());
 	}
 	return DemoplayLoadSetup();
 }
 
 
-// Key_Data を返す //
-uint16_t DemoplayMove(void)
+INPUT_BITS DemoplayMove(void)
 {
 	DWORD ptr;
 
@@ -160,42 +157,15 @@ uint16_t DemoplayMove(void)
 }
 
 
-// デモプレイロードの事後処理 //
-void DemoplayLoadCleanup(void)
+void DemoplayCleanup(void)
 {
 	ConfigDat          = ConfigTemp;
 	DemoplayLoadEnable = FALSE;
 }
 
 
-// リプレイデータの準備 //
-void ReplayInit(void)
+void DemoplaySaveReplay(void)
 {
-	// これは同じ //
-	DemoplayInit();
-}
-
-
-// リプレイデータを保存する //
-void ReplayRecord(uint16_t key)
-{
-	if(!DemoplaySaveEnable) return;
-
-	DemoBuffer[DemoBufPtr++] = key;
-
-	if(DemoBufPtr == DEMOBUF_MAX || (key&KEY_ESC)){
-		DemoBufPtr--;
-		ReplaySave();					// 強制吐き出し
-		DemoplaySaveEnable = FALSE;
-	}
-}
-
-
-// リプレイデータをファイルに書き込む //
-void ReplaySave(void)
-{
-	char			buf[100];
-
 	if(!DemoplaySaveEnable) return;
 
 	// すぐさま、無効化する //
@@ -204,10 +174,10 @@ void ReplaySave(void)
 	DemoBuffer[DemoBufPtr] = KEY_ESC;
 	DemoInfo.DataSize = DemoBufPtr+1;
 
-	const auto demo_size = (sizeof(WORD) * DemoInfo.DataSize);
+	const auto demo_size = (sizeof(INPUT_BITS) * DemoInfo.DataSize);
 	PACKFILE_WRITE out = { {
 		DemoInfo,
-		std::span<WORD>{ DemoBuffer, demo_size },
+		std::span<INPUT_BITS>{ DemoBuffer, demo_size },
 	} };
 
 	const auto fn = ReplayFN(GameStage);
@@ -215,8 +185,7 @@ void ReplaySave(void)
 }
 
 
-// リプレイデータをロードする //
-bool ReplayLoad(int stage)
+bool DemoplayLoadReplay(int stage)
 {
 	BYTE_BUFFER_OWNED	temp;
 
@@ -235,32 +204,4 @@ bool ReplayLoad(int stage)
 	}
 	memcpy(DemoBuffer, temp.get(), sizeof(WORD)*DemoInfo.DataSize);
 	return DemoplayLoadSetup();
-}
-
-
-// Key_Data を返す //
-uint16_t ReplayMove(void)
-{
-	DWORD	ptr;
-
-	if(!DemoplayLoadEnable) return KEY_ESC;
-
-	ptr = DemoBufPtr;
-
-	if(ptr >= DemoInfo.DataSize){
-		ptr = DemoBufPtr;
-		DemoplayLoadEnable = FALSE;
-	}
-	else
-		DemoBufPtr++;
-
-	return DemoBuffer[ptr];
-}
-
-
-// リプレイデータロードの事後処理 //
-void ReplayLoadCleanup(void)
-{
-	ConfigDat = ConfigTemp;
-	DemoplayLoadEnable = FALSE;
 }

@@ -3,7 +3,6 @@
 /*                                                                           */
 /*                                                                           */
 
-#include "DirectXUTYs/DX_TYPE.H"
 #include "game/graphics.h"
 #include "ENEMY.H"
 #include "CONFIG.H"
@@ -11,8 +10,8 @@
 #include "MUSIC.H"
 #include "LOADER.H"
 #include "LZ_UTY.H"
-#include "DirectXUTYs/DS_UTY.H"
 #include "DirectXUTYs/PBGMIDI.H"
+#include "platform/snd.h"
 #include <assert.h>
 #include <ddraw.h>
 

@@ -6,7 +6,7 @@
 #include "TAMA.H"
 #include "GIAN.H"
 #include "LEVEL.H"
-#include "DirectXUTYs/DS_UTY.H"
+#include "platform/snd.h"
 
 
 ////グローバル変数////
@@ -555,7 +555,7 @@ void tama_clear(void)
 }
 
 // 弾を得点化する(Ret : 得点)
-DWORD tama2score(void)
+uint32_t tama2score(void)
 {
 	WORD		i;
 	DWORD		sum = 0;
@@ -1125,7 +1125,7 @@ void __fastcall tamaOmove(TAMA_DATA *t)
 				if(TamaCmd.cmd&TAMA_ZSET) TamaCmd.d=0,TamaCmd.dw-=6;
 				TamaCmd.type = T_NORM;
 				TamaCmd.option = TOP_NONE;
-				SndPlayEX(12, TamaCmd.x, 0);
+				SndPlay(12, TamaCmd.x);
 				tama_set();		// 難易度で変化させるところがポイント
 			}
 		return;

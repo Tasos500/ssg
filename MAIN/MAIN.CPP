@@ -1,31 +1,28 @@
 #include "../GIAN07/CONFIG.H"
-#include "../GIAN07/EFFECT.H"
+#include "../GIAN07/ENTRY.H"
 #include "../GIAN07/GAMEMAIN.H"
-#include "../GIAN07/LOADER.H"
-#include "DirectXUTYs/DD_UTY.H"
-#include "DirectXUTYs/DI_UTY.H"
-#include "DirectXUTYs/DS_UTY.H"
 #include "DirectXUTYs/PBGMIDI.H"
+#include "strings/title.h"
+#include "platform/input.h"
+#include "platform/snd.h"
 #include "platform/unicode.h"
+#include "game/input.h"
 #include <direct.h>
 
+#pragma comment(lib, "user32.lib")
+
 extern constexpr auto APP_CLASS = _UNICODE("GIAN07");
-extern constexpr auto APP_NAME = _UNICODE("秋霜玉");
+extern constexpr auto APP_NAME = _UNICODE(GAME_TITLE);
 
-
-// プロトタイプ宣言 //
-void XMain(void);
-BOOL XInit(void);
-void XCleanup(void);
 
 long FAR __stdcall WndProc(HWND hWnd,UINT message,WPARAM wParam,LPARAM lParam);
 static BOOL AppInit(HINSTANCE hInstance,int nCmdShow);
-static void AppCleanup(void);
 
 //void SaveSnapshot(HWND hWnd);
 
 
 // グローバル変数 //
+HINSTANCE	hInstanceMain;
 HWND	hWndMain;
 BOOL	bIsActive;
 BOOL	bMouseVisible;
@@ -35,11 +32,11 @@ DWORD	WaitTime;
 int __stdcall WinMain(HINSTANCE hInstance,HINSTANCE hPrevInstance,LPSTR lpCmdLine,int nShowCmd)
 {
 	MSG			msg;
-	HWND		old_gian;
 	DWORD		tempdw;
 
 	// 他のところで起動していたらそいつをRestoreする //
-	if(old_gian=FindWindowW(APP_CLASS,NULL)){
+	auto old_gian = FindWindowW(APP_CLASS, nullptr);
+	if(old_gian) {
 		SetForegroundWindow(old_gian);
 		SendMessageW(old_gian,WM_SYSCOMMAND,SC_RESTORE,0);
 		return FALSE;
@@ -73,7 +70,16 @@ int __stdcall WinMain(HINSTANCE hInstance,HINSTANCE hPrevInstance,LPSTR lpCmdLin
 			// １フレーム進める //
 			tempdw = timeGetTime();
 			if(((tempdw - WaitTime) >= 16) || (ConfigDat.FPSDivisor.v == 0)) {
-				GameMain();
+				Key_Read(PadBindings);
+
+				bool quit = false;
+				GameMain(quit);
+				if(quit) {
+					// DestroyWindow->PostMessage
+					// タスクバーにアイコンが残るのを防止だっけ？
+					PostMessage(hWndMain, WM_SYSCOMMAND, SC_CLOSE, 0);
+				}
+
 				WaitTime = tempdw;
 			}
 			//else Sleep(1);
@@ -97,10 +103,12 @@ long FAR __stdcall WndProc(HWND hWnd,UINT message,WPARAM wParam,LPARAM lParam)
 			if(bIsActive){
 				bMouseVisible = FALSE;
 				Mid_Play();
+				SndResumeAll();
 			}
 			else{
 				bMouseVisible = TRUE;
 				Mid_Stop();
+				SndPauseAll();
 			}
 		break;
 
@@ -136,14 +144,13 @@ long FAR __stdcall WndProc(HWND hWnd,UINT message,WPARAM wParam,LPARAM lParam)
 		case WM_SYSCOMMAND:
 			if(wParam == SC_CLOSE){
 				ExitFlag = TRUE;
-				AppCleanup();
+				XCleanup();
+				ShowCursor(true);
 				MoveWindow(hWndMain,0,0,0,0,TRUE);
 				ShowWindow(hWndMain,SW_HIDE);
 				DestroyWindow(hWndMain);
-				break;
 			}
-			if(wParam == SC_RESTORE)	break;
-		return 1;
+			break;
 
 		case WM_SYSKEYDOWN:
 			if(ExitFlag) return 0;
@@ -199,6 +206,7 @@ static BOOL AppInit(HINSTANCE hInstance,int nCmdShow)
 		NULL);											//
 
 	if(!hWndMain) return FALSE;
+	hInstanceMain = hInstance;
 
 	//ShowWindow(hWndMain,nCmdShow);
 	//UpdateWindow(hWndMain);
@@ -207,84 +215,12 @@ static BOOL AppInit(HINSTANCE hInstance,int nCmdShow)
 	hMenu = GetSystemMenu(hWndMain,FALSE);
 	DeleteMenu(hMenu,SC_MAXIMIZE,MF_BYCOMMAND);
 	DeleteMenu(hMenu,SC_MINIMIZE,MF_BYCOMMAND);
-	DeleteMenu(hMenu,SC_MOVE    ,MF_BYCOMMAND);
 	DeleteMenu(hMenu,SC_SIZE    ,MF_BYCOMMAND);
 
-
-	DebugSetup();
-
-	// コンフィグをロードする //
-	ConfigLoad();
-
-	// キーボード(JoyPad)入力を受け付ける //
-	Key_Start(hInstance,hWndMain);
-
-	try{
-		if(!GrpEnum(hWndMain))	throw(FALSE);
-		if(!XInit())			throw(FALSE);		// コンフィグ依存の初期化処理
-	}
-	catch(BOOL flag){
+	if(!XInit()) {
 		DestroyWindow(hWndMain);
-		return flag;
-	}
-
-	return TRUE;
-}
-
-static void AppCleanup(void)
-{
-	XCleanup();
-
-	DxObj.Cleanup();
-	SndCleanup();
-	Mid_Stop();
-	Mid_End();
-	Key_End();
-
-	ShowCursor(TRUE);
-}
-
-BOOL XInit(void)
-{
-	Key_PadConfig2(ConfigDat.PadTama.v,   KEY_TAMA);
-	Key_PadConfig2(ConfigDat.PadBomb.v,   KEY_BOMB);
-	Key_PadConfig2(ConfigDat.PadShift.v,  KEY_SHIFT);
-	Key_PadConfig2(ConfigDat.PadCancel.v, KEY_ESC);
-
-	// グラフィックの初期化 //
-	if(!DxObj.Init(ConfigDat.DeviceID.v, ConfigDat.BitDepth.v)) {
 		return false;
 	}
 
-	// サウンドの初期化 //
-	if(ConfigDat.SoundFlags.v & SNDF_WAVE_ENABLE) {
-		// 何らかの理由で使用できなければ、Disable とする //
-		if(!SndInit(hWndMain)) {
-			ConfigDat.SoundFlags.v &= (~SNDF_WAVE_ENABLE);
-		}
-		else if(!LoadSound()){
-			ConfigDat.SoundFlags.v &= (~SNDF_WAVE_ENABLE);
-			SndCleanup();
-		}
-	}
-
-	// ＭＩＤＩの初期化 //
-	// MIDFN_MIDLOOP を使用すべきか //
-	if(ConfigDat.SoundFlags.v & SNDF_MIDI_ENABLE) {
-		if(!Mid_Start(MIDFN_CALLBACK,MIDPL_NORM))
-			ConfigDat.SoundFlags.v &= (~SNDF_MIDI_ENABLE);
-	}
-
-	// Call a different *Init() function here to quickly test a different //
-	// game state. //
-	if(!SProjectInit()) return FALSE;
-
-	GrpSetCaptureFilename("秋霜");
-
 	return TRUE;
-}
-
-void XCleanup(void)
-{
-	ConfigSave();
 }

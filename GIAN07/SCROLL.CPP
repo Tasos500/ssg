@@ -8,9 +8,9 @@
 #include "DEMOPLAY.H"
 #include "GIAN.H"
 #include "LEVEL.H"
-#include "DirectXUTYs/DI_UTY.H"
-#include "DirectXUTYs/DS_UTY.H"
 #include "DirectXUTYs/PBGMIDI.H"
+#include "platform/snd.h"
+#include "game/input.h"
 
 
 
@@ -158,7 +158,7 @@ static void enemy_set(void)
 					if(
 						(DemoplaySaveEnable || DemoplayLoadEnable) ||
 						(ConfigDat.GraphFlags.v & GRPF_MSG_DISABLE) ||
-						(GetAsyncKeyState(VK_CONTROL) & 0x8000)
+						(SystemKey_Data & SYSKEY_SKIP)
 					) {
 						CtrlFlag = true;
 					}
@@ -176,7 +176,7 @@ static void enemy_set(void)
 					else SclInfo.ReturnFlag = FALSE;
 				}
 /*
-				if((GetAsyncKeyState(VK_CONTROL)&0x8000)&&SclInfo.MsgFlag)
+				if((Key_Data & KEY_SKIP) && SclInfo.MsgFlag)
 					GameCount+=(temp-GameCount)/3;
 				else if((Key_Data&KEY_RETURN) && SclInfo.ReturnFlag==FALSE){
 					GameCount  = temp;
@@ -275,7 +275,15 @@ static void enemy_set(void)
 					if(LoadMusic(cmd[1])){
 						Mid_Play();
 						mtitle = Mid_GetTitle();
-						if(mtitle) sprintf(buf,"♪ %.100s",mtitle);
+						if(mtitle) {
+							// ♪ in Shift-JIS. Since this codepoint is still
+							// combined with the Shift-JIS music titles baked
+							// into the MIDI files, we have to spell out its
+							// bytes to ensure that the entire string stays in
+							// the same encoding even if we compile with UTF-8
+							// literals.
+							sprintf(buf, "\x81\xF4 %.100s", mtitle);
+						}
 						SetMusicTitle(460,buf);
 					}
 				}
@@ -291,7 +299,7 @@ static void enemy_set(void)
 				switch(cmd[1]){
 				case(SEFC_WARN):
 					//effect_set(0,0,EFC_WARNBOSS,GameStage);
-					SndPlayEX(8,GX_MID,true);
+					SndPlay(8, GX_MID, true);
 					WarningEffectSet();
 					//StringEffect3(GameStage);
 				break;
@@ -332,7 +340,7 @@ static void enemy_set(void)
 
 			case(SCL_STAGECLEAR):	// ステージクリア
 				if(ConfigDat.StageSelect.v) {
-					ReplaySave();
+					DemoplaySaveReplay();
 					GameExit(TRUE);
 					return;
 				}
@@ -343,7 +351,7 @@ static void enemy_set(void)
 
 			case(SCL_GAMECLEAR):
 				if(ConfigDat.StageSelect.v) {
-					ReplaySave();
+					DemoplaySaveReplay();
 					GameExit(TRUE);
 					return;
 				}
@@ -363,7 +371,7 @@ static void enemy_set(void)
 
 			case(SCL_EXTRACLEAR):
 				if(ConfigDat.StageSelect.v) {
-					ReplaySave();	// 終了はしない
+					DemoplaySaveReplay();	// 終了はしない
 				}
 				if(DemoplayLoadEnable) return;
 

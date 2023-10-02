@@ -22,7 +22,11 @@ struct PIXEL_POINT {
 	PIXEL_POINT operator +(const PIXEL_POINT& other) const {
 		return { (x + other.x), (y + other.y) };
 	}
+
+	std::strong_ordering operator <=>(const PIXEL_POINT& other) const = default;
 };
+
+PIXEL_POINT& operator -=(PIXEL_POINT& self, const PIXEL_POINT& other);
 
 // Area size in unscaled pixel space.
 // Using signed integers to avoid complicating the conversion into rectangle
@@ -114,11 +118,16 @@ constexpr auto WORLD_COORD_BITS = 6;
 
 using WORLD_COORD = int;
 
+inline constexpr WORLD_COORD PixelToWorld(PIXEL_COORD v) {
+	return (v << WORLD_COORD_BITS);
+}
+
 struct WORLD_POINT {
 	WORLD_COORD x;
 	WORLD_COORD y;
 
-	WORLD_POINT() {
+	[[gsl::suppress(type.6)]]
+	WORLD_POINT() noexcept {
 	}
 
 	// World-space points should never be constructed from integer literals.

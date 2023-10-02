@@ -9,7 +9,10 @@
 #include <array>
 #include <assert.h>
 
-SURFACE_GDI::SURFACE_GDI() :
+#pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "user32.lib")
+
+SURFACE_GDI::SURFACE_GDI() noexcept :
 	dc(CreateCompatibleDC(GetDC(nullptr)))
 {
 }
@@ -26,8 +29,12 @@ static_assert(offsetof(RGBQUAD, rgbGreen) == offsetof(BGRA, g));
 static_assert(offsetof(RGBQUAD, rgbRed) == offsetof(BGRA, r));
 static_assert(offsetof(RGBQUAD, rgbReserved) == offsetof(BGRA, a));
 
-bool SURFACE_GDI::Save(const PATH_LITERAL s) const
+bool SURFACE_GDI::Save(FILE_STREAM_WRITE* stream) const
 {
+	if(!stream) {
+		return false;
+	}
+
 	DIBSECTION dib;
 	if(!GetObject(img, sizeof(DIBSECTION), &dib)) {
 		return false;
@@ -51,7 +58,7 @@ bool SURFACE_GDI::Save(const PATH_LITERAL s) const
 		);
 
 		auto* info = reinterpret_cast<BMP_INFOHEADER *>(info_buf.data());
-		std::span<BGRA> palette = {
+		const std::span<BGRA> palette = {
 			reinterpret_cast<BGRA *>(&info[1]), palette_size
 		};
 
@@ -74,7 +81,7 @@ bool SURFACE_GDI::Save(const PATH_LITERAL s) const
 			return false;
 		}
 		return BMPSave(
-			s, size, info->biPlanes, info->biBitCount, palette, pixels
+			stream, size, info->biPlanes, info->biBitCount, palette, pixels
 		);
 	}
 
@@ -88,11 +95,11 @@ bool SURFACE_GDI::Save(const PATH_LITERAL s) const
 		palette = bgra;
 	}
 	const std::span<const std::byte> pixels = {
-		reinterpret_cast<const std::byte *>(dib.dsBm.bmBits),
+		static_cast<const std::byte *>(dib.dsBm.bmBits),
 		size_t(dib.dsBm.bmWidthBytes * dib.dsBm.bmHeight)
 	};
 	return BMPSave(
-		s,
+		stream,
 		{ dib.dsBmih.biWidth, dib.dsBmih.biHeight },
 		dib.dsBmih.biPlanes,
 		dib.dsBmih.biBitCount,
@@ -101,7 +108,7 @@ bool SURFACE_GDI::Save(const PATH_LITERAL s) const
 	);
 }
 
-void SURFACE_GDI::Delete()
+void SURFACE_GDI::Delete() noexcept
 {
 	if(img) {
 		SelectObject(dc, stock_img);

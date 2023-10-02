@@ -3,8 +3,47 @@
 /*                                                                           */
 /*                                                                           */
 
-#include "D2_Polygon.H"
 #include "DD_CLIP2D.H"
+#include <limits>
+#include <string.h>
+
+
+//// [更新履歴] ////
+// 2000/05/15       : アセンブラ化で、かろうじてバグ排除
+
+
+
+//// [構造体] ////
+
+typedef struct tagLINE_WORK{
+	uint64_t	x;	// Upper 32 bits: 開始ｘ座標, lower 32 bits: 誤差変数
+	uint32_t	dlx;	// 誤差変数加算値
+	uint32_t	d;	// 最小ｘ移動量
+} LINE_WORK;
+
+
+
+//// [インライン関数] ////
+
+// DDA 構造体のセット //
+inline void SetLineWork(LINE_WORK *w, int x1, int x2, int dy)
+{
+	if(dy == 0) {
+		dy++;
+	}
+	const auto dx = (x2 - x1);
+	const auto d = (dx / dy);
+	const auto err = (dx % dy);
+	const auto dy_unsigned = std::make_unsigned_t<decltype(dy)>(dy);
+	if(err < 0) {
+		w->d = (d - 1);
+		w->dlx = -((static_cast<uint64_t>(-err) << 32) / dy_unsigned);
+	} else {
+		w->d = d;
+		w->dlx = ((static_cast<uint64_t>(err) << 32) / dy_unsigned);
+	}
+	w->x = ((static_cast<uint64_t>(x1) << 32) | 0x80000000);
+}
 
 
 static LINE_WORK TZOID_A,TZOID_B;
@@ -77,7 +116,6 @@ void _2DPolygon(WINDOW_POINT *p, int n)
 		if(p[i].y < p[j].y)	dy = p[i].y-TopY;
 		else				dy = p[j].y-TopY;
 
-		//Key_Read();
 		//if(Key_Data&KEY_TAMA) return;
 
 		TopY = DrawTrapezoid(TopY,dy);
@@ -100,10 +138,10 @@ void _2DPolygon(WINDOW_POINT *p, int n)
 	}
 }
 
-extern BYTE				*Grp_Vram;				// これは公開しない
+extern uint8_t*	Grp_Vram;	// これは公開しない
 extern long				Grp_Pitch;				// これも公開しない
-extern DWORD			Grp_AddrY[480];			// Ｙ座標テーブル
-extern DWORD			Col2D;
+extern uint32_t	Grp_AddrY[480];	// Ｙ座標テーブル
+extern uint32_t	Col2D;
 
 
 // 横ラインを引く //
@@ -117,71 +155,27 @@ static void GrpHLineX(int x1, int x2, int y)
 	//if(y<0) y = 0;
 	//if(y>479) y = 479;
 
-
-	_asm{
-		PUSH EDI			// EDI 保存
-
-		MOV EDI,Grp_Vram
-		JZ  HL_END			// NULL チェック(高速化のために外す？)
-
-		LEA EBX,Grp_AddrY
-		MOV EAX,y			// EAX = y
-		SHL EAX,2			// EAX = y*4 (DWORD)
-		ADD EBX,EAX			// EBX = Grp_AddrY+y(DD) <Pointer>
-		MOV EAX,[EBX]		// EAX = Grp_AddrY[y]
-
-		ADD EDI,EAX			// EDI := Vram + Grp_AddrY[y]
-		MOV EBX,x1			// EBX := x1
-		MOV ECX,x2			// ECX := x2
-		SUB ECX,EBX			// ECX := x2 - x1
-		ADD EDI,EBX			// EDI := Vram + Grp_AddrY[y] + x1(EBX)
-		INC ECX				// ECX := x2 - x1 + 1 (Length)
-		MOV EBX,ECX			// EBX := x2 - x1 + 1
-		AND EBX,3			// EBX := (x2-x1 +1)%4
-		SHR ECX,2			// ECX := (x2-x1 +1)/4
-
-		MOV EAX,Col2D
-
-		REP STOSD			// DWORD 描画 (４の倍数で描ける範囲で)
-		MOV ECX,EBX			// ECX := (x2-x1 +1)%4
-		REP STOSB			// BYTE 描画 (残りを描き込む)
-
-HL_END:
-		POP EDI				// EDI 復元
-	}
+	memset((Grp_Vram + Grp_AddrY[y] + x1), Col2D, ((x2 - x1) + 1));
 }
 
 // 台形の描画 //
 int DrawTrapezoid(int y, int dy)
 {
-	int		left_x = TZOID_A.x;
-	int		det_x  = TZOID_B.x;// - left_x;
+	// NULL チェック(高速化のために外す？)
+	if(!Grp_Vram) {
+		return y;
+	}
+
+	auto left_x = TZOID_A.x;
+	auto det_x  = TZOID_B.x; // - left_x;
+	const auto left_step = ((uint64_t(TZOID_A.d) << 32) + TZOID_A.dlx);
+	const auto det_step  = ((uint64_t(TZOID_B.d) << 32) + TZOID_B.dlx);
 
 	do{
-		GrpHLineX(left_x,det_x,y);
+		GrpHLineX((left_x >> 32), (det_x >> 32), y);
 
-		_asm{
-			//MOV		EAX,TZOID_B.dlx
-			//ADD		TZOID_B.s,EAX
-			MOV		EAX,TZOID_B.s
-			ADD		EAX,TZOID_B.dlx
-			MOV		TZOID_B.s,EAX
-
-			MOV		EAX,TZOID_B.x
-			ADC		EAX,TZOID_B.d
-			MOV		TZOID_B.x,EAX
-			MOV		det_x,EAX
-
-			//MOV		EAX,TZOID_A.dlx
-			//ADD		TZOID_A.s,EAX
-			MOV		EAX,TZOID_A.s
-			ADD		EAX,TZOID_A.dlx
-			MOV		TZOID_A.s,EAX
-
-			MOV		EAX,left_x
-			ADC		EAX,TZOID_A.d
-			MOV		left_x,EAX
-		}
+		left_x += left_step;
+		det_x  += det_step;
 
 		//det_x -= left_x;
 		y++;
@@ -189,6 +183,7 @@ int DrawTrapezoid(int y, int dy)
 	while((--dy)>=0);
 
 	TZOID_A.x = left_x;
+	TZOID_B.x = det_x;
 
 	return y;
 }

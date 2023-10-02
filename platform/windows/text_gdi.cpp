@@ -7,6 +7,7 @@
 
 #include "platform/windows/text_gdi.h"
 #include <assert.h>
+#include <malloc.h>
 
 TEXTRENDER_GDI_SESSION_BASE::TEXTRENDER_GDI_SESSION_BASE(
 	const PIXEL_LTWH& rect, HDC hdc, const std::span<HFONT> fonts
@@ -20,9 +21,9 @@ TEXTRENDER_GDI_SESSION_BASE::TEXTRENDER_GDI_SESSION_BASE(
 	//   rectangle.
 	const PIXEL_LTRB ltrb = rect;
 	const RECT r = { ltrb.left, ltrb.top, ltrb.right, ltrb.bottom };
-	auto black = reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
-	auto rect_filled_with_black = FillRect(hdc, &r, black);
-	auto background_mode_set_to_transparent = SetBkMode(hdc, TRANSPARENT);
+	auto black = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+	const auto rect_filled_with_black = FillRect(hdc, &r, black);
+	const auto background_mode_set_to_transparent = SetBkMode(hdc, TRANSPARENT);
 	assert(rect_filled_with_black);
 	assert(background_mode_set_to_transparent);
 }
@@ -44,7 +45,7 @@ void TEXTRENDER_GDI_SESSION_BASE::SetFont(size_t id)
 
 void TEXTRENDER_GDI_SESSION_BASE::SetColor(const RGBA& color)
 {
-	COLORREF color_gdi = RGB(color.r, color.g, color.b);
+	const COLORREF color_gdi = RGB(color.r, color.g, color.b);
 	if(color_cur != color_gdi) {
 		SetTextColor(hdc, color_gdi);
 		color_cur = color_gdi;
@@ -57,6 +58,29 @@ void TEXTRENDER_GDI_SESSION_BASE::Put(
 	std::optional<RGBA> color
 )
 {
+	if(str.size() == 0) {
+		return;
+	}
+
+	auto* str_w = static_cast<wchar_t *>(_malloca(
+		str.size() * sizeof(wchar_t)
+	));
+	if(!str_w) {
+		return;
+	}
+
+	// Try UTF-8
+	auto len_w = MultiByteToWideChar(
+		CP_UTF8, MB_ERR_INVALID_CHARS, str.data(), str.size(), str_w, str.size()
+	);
+	if((len_w == 0) && (GetLastError() == ERROR_NO_UNICODE_TRANSLATION)) {
+		// Fall back on Shift-JIS
+		len_w = MultiByteToWideChar(
+			932, MB_PRECOMPOSED, str.data(), str.size(), str_w, str.size()
+		);
+		assert(len_w > 0);
+	}
+
 	if(color) {
 		SetColor(color.value());
 	}
@@ -66,6 +90,7 @@ void TEXTRENDER_GDI_SESSION_BASE::Put(
 		.right = (rect.left + rect.w),
 		.bottom = (rect.top + rect.h),
 	};
-	const UINT flags = (DT_LEFT | DT_TOP | DT_SINGLELINE);
-	DrawTextA(hdc, str.data(), str.size(), &r, flags);
+	constexpr UINT flags = (DT_LEFT | DT_TOP | DT_SINGLELINE);
+	DrawTextW(hdc, str_w, len_w, &r, flags);
+	_freea(str_w);
 }

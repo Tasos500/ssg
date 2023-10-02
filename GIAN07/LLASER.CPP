@@ -7,7 +7,7 @@
 #include "MAID.H"
 #include "DirectXUTYs/DD_GRP3D.H"
 #include "DirectXUTYs/DD_UTY.H"
-#include "DirectXUTYs/DS_UTY.H"
+#include "platform/snd.h"
 
 
 //// レーザー変数２ ////
@@ -21,7 +21,7 @@ static void _LLaserHitCheck(LLASER_DATA *lp);
 static void _LLaserXYSet(int id);			// レーザーの座標をセットする
 
 
-extern BOOL LLaserSet(BYTE id)
+bool LLaserSet(uint8_t id)
 {
 	LLASER_DATA		*lp;
 	int				i;
@@ -74,7 +74,7 @@ extern BOOL LLaserSet(BYTE id)
 
 	lp->flag = LLF_LINE;
 
-	//SndPlayEX(1,LaserCmd.x,0);
+	//SndPlay(1, LaserCmd.x);
 
 	return TRUE;
 }
@@ -88,7 +88,7 @@ extern void LLaserOpen(ENEMY_DATA *e,BYTE id)
 		lp = LLaser+i;
 		if((lp->e==e) && (lp->EnemyID==id || id==ECLCST_LLASERALL) && lp->flag!=LLF_DISABLE){
 			lp->flag = LLF_OPEN;
-			SndPlayEX(2,lp->x,true);
+			SndPlay(2, lp->x, true);
 		}
 	}
 }

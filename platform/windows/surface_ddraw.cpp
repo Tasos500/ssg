@@ -7,9 +7,9 @@
 #include <array>
 #include <ddraw.h>
 
-bool DDrawSaveSurface(const PATH_LITERAL s, IDirectDrawSurface* surf)
+bool DDrawSaveSurface(FILE_STREAM_WRITE* stream, IDirectDrawSurface* surf)
 {
-	if(!surf) {
+	if(!surf || !stream) {
 		return false;
 	}
 	std::array<BGRA, BMP_PALETTE_SIZE_MAX> bgra_memory;
@@ -45,13 +45,14 @@ bool DDrawSaveSurface(const PATH_LITERAL s, IDirectDrawSurface* surf)
 		// boundaries than the DWORD alignment of .BMP files. Let's just round
 		// up the .BMP width to that stride so that we can directly write the
 		// surface memory in a single block, without trimming the rows.
-		int32_t(desc.lPitch / (bpp / 8)), -int32_t(desc.dwHeight)
+		static_cast<int32_t>(desc.lPitch / (bpp / 8)),
+		-static_cast<int32_t>(desc.dwHeight)
 	};
 	const std::span<const std::byte> pixels = {
-		reinterpret_cast<const std::byte *>(desc.lpSurface),
+		static_cast<const std::byte *>(desc.lpSurface),
 		size_t(desc.lPitch * desc.dwHeight),
 	};
-	const auto ret = BMPSave(s, size, 1, bpp, palette, pixels);
+	const auto ret = BMPSave(stream, size, 1, bpp, palette, pixels);
 	surf->Unlock(nullptr);
 	return ret;
 }

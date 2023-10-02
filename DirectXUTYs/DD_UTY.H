@@ -27,9 +27,8 @@
 #include "game/graphics.h"
 #include "platform/buffer.h"
 #include "platform/windows/surface_ddraw.h"
-#include "DX_TYPE.H"					// 型＆マクロ
 #include "DX_ERROR.H"					// エラー処理用関数
-#include "MtoB.h"						// スクリーンキャプチャー
+#include <algorithm>
 #include <array>
 #include <variant>
 
@@ -90,7 +89,7 @@ public:
 		}
 
 	public:
-		constexpr BITDEPTH() :
+		constexpr BITDEPTH() noexcept :
 			bpp(0) {
 		}
 		constexpr BITDEPTH(const BITDEPTH& other) = default;
@@ -298,7 +297,7 @@ extern DWORD		DxEnumNow;
 
 
 // 初期化など //
-bool GrpEnum(HWND hWnd);	// 使用できるデバイスを列挙する
+bool GrpEnum(void);	// 使用できるデバイスを列挙する
 void GrpSetClip(int sx, int sy, int ex, int ey);	// 3DViewportが生きていたらそちらもセット
 
 void GrpGetPalette(PALETTE& pal);	// 現在のパレットを取得する

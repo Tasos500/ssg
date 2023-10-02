@@ -5,8 +5,8 @@
 
 #include "MAIDTAMA.H"
 #include "GIAN.H"
-#include "DirectXUTYs/DI_UTY.H"
-#include "DirectXUTYs/DS_UTY.H"
+#include "platform/snd.h"
+#include "game/input.h"
 
 
 ///// [ひみつの関数] /////
@@ -332,7 +332,7 @@ void MLaserSet(uint16_t time)
 
 	if(Viv.lay_time == 0){
 		Viv.lay_time = time;
-		SndPlayEX(SOUND_ID_SBLASER,Viv.x,0);
+		SndPlay(SOUND_ID_SBLASER, Viv.x);
 	}
 }
 

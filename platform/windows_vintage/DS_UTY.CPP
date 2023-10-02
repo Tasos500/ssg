@@ -7,8 +7,9 @@
 
 #include <dsound.h>
 #include "platform/file.h"
-#include "DS_UTY.H"
-#pragma message(PBGWIN_DS_UTY_H)
+#include "platform/snd.h"
+#include "DirectXUTYs/DX_ERROR.H"	// エラー処理用関数
+#pragma message("DS_UTY : Version 0.03 : Update 2000/02/04")
 
 #pragma comment(lib,"dsound.lib")
 
@@ -24,17 +25,74 @@
 	#pragma message("      DirectSound : Version <= 6.00???")
 #endif
 
+#ifndef DSBCAPS_CTRLDEFAULT
+	#define DSBCAPS_CTRLDEFAULT \
+		(DSBCAPS_CTRLPAN | DSBCAPS_CTRLVOLUME | DSBCAPS_CTRLFREQUENCY)
+#endif
+
 //#pragma optimize("",off)
+
+// 構造体 //
+
+#pragma pack(push, PBG_WAVEHEAD_PACK)
+#pragma pack(2)
+
+typedef struct tagWAVEHEAD{
+	DWORD	RIFF;
+	DWORD	RiffLen;
+	DWORD	WAVE;
+	DWORD	FMT;
+	DWORD	WaveLen;
+
+	WORD	tag;
+	WORD	ch;
+	DWORD	SamplePerSec;
+	DWORD	AvgBytePerSec;
+	WORD	BlockAlign;
+	WORD	BitPerSample;
+
+	DWORD	DATA;
+	DWORD	DataLen;
+} WAVEHEAD;
+
+typedef struct tagWAVEHEAD_FACT{
+	DWORD	RIFF;
+	DWORD	RiffLen;
+	DWORD	WAVE;
+	DWORD	FMT;
+	DWORD	WaveLen;
+
+	WORD	tag;
+	WORD	ch;
+	DWORD	SamplePerSec;
+	DWORD	AvgBytePerSec;
+	WORD	BlockAlign;
+	WORD	BitPerSample;
+
+	DWORD	FACT;
+	WORD	Dummy_2;
+	WORD	Dummy_3;
+	WORD	Dummy_4;
+	WORD	Dummy_5;
+
+	DWORD	DATA;
+	DWORD	DataLen;
+} WAVEHEAD_FACT;
+
+#pragma pack(pop, PBG_WAVEHEAD_PACK)
+
 
 typedef struct tagSE_STRUCT{
 	BYTE				*data;		//
 	DWORD				size;		//
 	int					max;		//
-	int					now;		//
+	SND_INSTANCE_ID	now;
 	IDirectSoundBuffer	*buf[1];	//
 } SE_STRUCT,*LPSE_STRUCT;
 
 
+// 補助 //
+void SndRelease(uint8_t id);
 bool SndFillBuffer(IDirectSoundBuffer *ds, uint8_t *data, size_t size);
 
 // サウンド停止用補助関数 //
@@ -42,10 +100,9 @@ static void _Snd_Stop(LPSE_STRUCT se,int no);
 
 LPDIRECTSOUND			Snd_DS = NULL;
 LPSE_STRUCT				Snd_OBJ[SND_OBJ_MAX];
-int						SndXMID = SND_XMID_DEFAULT;
 
 
-bool SndInit(HWND hWnd, int x_mid)
+bool SndInit(void)
 {
 	HRESULT		dsrval;
 
@@ -53,10 +110,9 @@ bool SndInit(HWND hWnd, int x_mid)
 		dsrval = DirectSoundCreate(NULL,&Snd_DS,NULL);
 		if(dsrval != DS_OK) throw("DirectSoundCreate に失敗");
 
-		dsrval = Snd_DS->SetCooperativeLevel(hWnd,DSSCL_NORMAL);
+		extern HWND hWndMain;
+		dsrval = Snd_DS->SetCooperativeLevel(hWndMain, DSSCL_NORMAL);
 		if(dsrval != DS_OK) throw("SetCooperativeLevel(DSound) に失敗");
-
-		SndXMID = x_mid;
 	}
 	catch(char *error){
 		DebugOut(error);
@@ -80,10 +136,14 @@ void SndCleanup(void)
 	for(i=0;i<SND_OBJ_MAX;i++) Snd_OBJ[i] = NULL;
 
 	// ＤＳオブジェクトを解放 //
-	RELEASE(Snd_DS);
+	if(Snd_DS) {
+		Snd_DS->Release();
+		Snd_DS = nullptr;
+	}
 }
 
-bool SndWAVLoad(BYTE_BUFFER_OWNED buffer, BYTE id, int max)
+// ＷＡＶファイルロード(ある制限があるが...) //
+bool SndWAVLoad(BYTE_BUFFER_OWNED buffer, uint8_t id, SND_INSTANCE_ID max)
 {
 	LPSE_STRUCT		p;
 	HRESULT			dsrval;
@@ -93,6 +153,9 @@ bool SndWAVLoad(BYTE_BUFFER_OWNED buffer, BYTE id, int max)
 
 	if(Snd_DS==NULL) return FALSE;
 
+	if(max == 0) {
+		return false;
+	}
 	if(id>=SND_OBJ_MAX) return FALSE;
 	se = &Snd_OBJ[id];
 
@@ -124,7 +187,7 @@ bool SndWAVLoad(BYTE_BUFFER_OWNED buffer, BYTE id, int max)
 	if(!maybe_data) {
 		return false;
 	}
-	const auto& data = maybe_data.value();
+	const auto data = maybe_data.value();
 
 	p->data = (BYTE *)LocalAlloc(LPTR,datalen);
 	memcpy(p->data, data.data(), data.size_bytes());
@@ -160,31 +223,11 @@ bool SndWAVLoad(BYTE_BUFFER_OWNED buffer, BYTE id, int max)
 	return TRUE;
 }
 
-void SndPlay(uint8_t id)
+void SndPlay(uint8_t id, int x, bool loop)
 {
 	HRESULT	dsrval;
 	DWORD	st;
-	LPSE_STRUCT se;
-
-	if(id>=SND_OBJ_MAX) return;
-
-	se = Snd_OBJ[id];
-	if(se == NULL || se->buf[se->now] == NULL) return;
-
-	dsrval = se->buf[se->now]->GetStatus(&st);
-	if(dsrval != DS_OK) st=0;
-	if((st&DSBSTATUS_PLAYING)==DSBSTATUS_PLAYING) _Snd_Stop(se,se->now);
-
-	se->buf[se->now]->SetPan(0);
-	se->buf[se->now]->Play(0,0,0);
-	se->now = (se->now+1)%(se->max);
-}
-
-void SndPlayEX(uint8_t id, int x, bool loop)
-{
-	HRESULT	dsrval;
-	DWORD	st;
-	DWORD	pan = (x - SndXMID)>>4;
+	int32_t	pan = ((x - SND_X_MID) / (SND_X_PER_DECIBEL / 100));
 	LPSE_STRUCT se;
 
 	if(id>=SND_OBJ_MAX) return;
@@ -218,11 +261,15 @@ void SndStop(uint8_t id)
 	}
 }
 
-void SndStopAll(void)
+// These are no-ops – by default, DirectSound pauses and resumes all playing
+// buffers as the window loses and regains focus. This behavior can be changed
+// by setting the DSBCAPS_GLOBALFOCUS flag on a buffer, but none of our buffers
+// do so yet.
+void SndPauseAll()
 {
-	int i;
-
-	for(i=0;i<SND_OBJ_MAX;i++) SndStop(i);
+}
+void SndResumeAll()
+{
 }
 
 bool SndFillBuffer(IDirectSoundBuffer *ds, uint8_t *data, size_t size)
@@ -266,11 +313,6 @@ void SndRelease(uint8_t id)
 	se->data = NULL;
 
 	LocalFree(se);
-}
-
-bool SndRestore(void)
-{
-	return FALSE;
 }
 
 static void _Snd_Stop(LPSE_STRUCT se,int no)
