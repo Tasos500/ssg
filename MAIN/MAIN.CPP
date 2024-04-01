@@ -1,13 +1,15 @@
 #include "../GIAN07/CONFIG.H"
 #include "../GIAN07/ENTRY.H"
 #include "../GIAN07/GAMEMAIN.H"
-#include "DirectXUTYs/PBGMIDI.H"
 #include "strings/title.h"
 #include "platform/input.h"
-#include "platform/snd.h"
+#include "platform/snd_backend.h"
 #include "platform/unicode.h"
+#include "game/bgm.h"
 #include "game/input.h"
 #include <direct.h>
+#include <windows.h>
+#include <mmsystem.h>
 
 #pragma comment(lib, "user32.lib")
 
@@ -29,7 +31,7 @@ BOOL	bMouseVisible;
 DWORD	WaitTime;
 
 
-int __stdcall WinMain(HINSTANCE hInstance,HINSTANCE hPrevInstance,LPSTR lpCmdLine,int nShowCmd)
+int __stdcall wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nShowCmd)
 {
 	MSG			msg;
 	DWORD		tempdw;
@@ -40,18 +42,6 @@ int __stdcall WinMain(HINSTANCE hInstance,HINSTANCE hPrevInstance,LPSTR lpCmdLin
 		SetForegroundWindow(old_gian);
 		SendMessageW(old_gian,WM_SYSCOMMAND,SC_RESTORE,0);
 		return FALSE;
-	}
-
-	// 引数があった場合、カレントディレクトリが変わってしまうので... //
-	if(*lpCmdLine){
-		char temp[1000],*p;
-		strcpy(temp,GetCommandLine()+1);
-		if((p=strchr(temp,'\"')) && (strchr(temp,'\\'))){
-			while(*p!='\\') p--;
-			*(p+1)='\0';
-			_chdir(temp);
-		}
-		else return FALSE;
 	}
 
 	if(!AppInit(hInstance,nShowCmd)){
@@ -102,13 +92,13 @@ long FAR __stdcall WndProc(HWND hWnd,UINT message,WPARAM wParam,LPARAM lParam)
 			bIsActive = (BOOL)wParam;
 			if(bIsActive){
 				bMouseVisible = FALSE;
-				Mid_Play();
-				SndResumeAll();
+				BGM_Pause();
+				SndBackend_PauseAll();
 			}
 			else{
 				bMouseVisible = TRUE;
-				Mid_Stop();
-				SndPauseAll();
+				BGM_Resume();
+				SndBackend_ResumeAll();
 			}
 		break;
 

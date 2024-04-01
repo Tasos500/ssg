@@ -8,9 +8,9 @@
 #include "DEMOPLAY.H"
 #include "GIAN.H"
 #include "LEVEL.H"
-#include "DirectXUTYs/PBGMIDI.H"
-#include "platform/snd.h"
+#include "game/bgm.h"
 #include "game/input.h"
+#include "game/snd.h"
 
 
 
@@ -138,11 +138,9 @@ static void enemy_set(void)
 	int			x,y;
 	BYTE		id;
 	BOOL		bFlag = TRUE;
-	char		*mtitle;
 	BYTE		*cmd;
 	DWORD		temp;
 //	BIT_DEVICE	*in;				// やばやば...
-	char		buf[100];
 	BOOL		CtrlFlag = FALSE;
 
 	while(bFlag){
@@ -271,20 +269,13 @@ static void enemy_set(void)
 			case(SCL_MUSIC):
 //				if(!(/*DemoplaySaveEnable||*/DemoplayLoadEnable)){
 				if(!IsDemoplay){
-					Mid_Stop();
-					if(LoadMusic(cmd[1])){
-						Mid_Play();
-						mtitle = Mid_GetTitle();
-						if(mtitle) {
-							// ♪ in Shift-JIS. Since this codepoint is still
-							// combined with the Shift-JIS music titles baked
-							// into the MIDI files, we have to spell out its
-							// bytes to ensure that the entire string stays in
-							// the same encoding even if we compile with UTF-8
-							// literals.
-							sprintf(buf, "\x81\xF4 %.100s", mtitle);
+					BGM_Stop();
+					if(BGM_Switch(cmd[1])){
+						BGM_Play();
+						const auto mtitle = BGM_Title();
+						if(!mtitle.empty()) {
+							SetMusicTitle(460, mtitle);
 						}
-						SetMusicTitle(460,buf);
 					}
 				}
 				SCL_Now += 2;
@@ -299,13 +290,13 @@ static void enemy_set(void)
 				switch(cmd[1]){
 				case(SEFC_WARN):
 					//effect_set(0,0,EFC_WARNBOSS,GameStage);
-					SndPlay(8, GX_MID, true);
+					Snd_SEPlay(8, GX_MID, true);
 					WarningEffectSet();
 					//StringEffect3(GameStage);
 				break;
 
-				case(SEFC_WARNSTOP):	SndStop(8);						break;	// Warning 停止
-				case(SEFC_MUSICFADE):	Mid_FadeOut(120);				break;	// 曲の停止
+				case(SEFC_WARNSTOP):	Snd_SEStop(8);	break;	// Warning 停止
+				case(SEFC_MUSICFADE):	BGM_FadeOut(120);	break;	// 曲の停止
 				case(SEFC_STG2BOSS):	ScrollCommand(SCMD_STG2BOSS);	break;	// ２面ボスScroll
 				case(SEFC_RASTERON):	ScrollCommand(SCMD_RASTER_ON);	break;	// ラスターON
 				case(SEFC_RASTEROFF):	ScrollCommand(SCMD_RASTER_OFF);	break;	// ラスターOFF

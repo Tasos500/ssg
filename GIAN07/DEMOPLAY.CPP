@@ -104,8 +104,7 @@ void DemoplaySaveDemo(void)
 	fn[3] = ('0' + GameStage);
 
 	const std::array<BYTE_BUFFER_BORROWED, 2> bufs = {
-		DemoInfo,
-		std::span<INPUT_BITS>{ DemoBuffer, (DemoBufPtr + 1) },
+		std::span(&DemoInfo, 1), std::span(DemoBuffer, (DemoBufPtr + 1)),
 	};
 	FileWrite(fn, std::span<const BYTE_BUFFER_BORROWED>{ bufs });
 
@@ -115,11 +114,8 @@ void DemoplaySaveDemo(void)
 
 bool DemoplayLoadDemo(int stage)
 {
-	// Not too pretty… //
-	BYTE_BUFFER_OWNED DATEnemyLoad(fil_no_t filno);
-
 	// 展開 //
-	const auto temp = DATEnemyLoad(stage-1+18);
+	const auto temp = LoadDemo(stage);
 	auto temp_cursor = temp.cursor();
 	{
 		const auto maybe_info = temp_cursor.next<DEMOPLAY_INFO>();
@@ -176,8 +172,7 @@ void DemoplaySaveReplay(void)
 
 	const auto demo_size = (sizeof(INPUT_BITS) * DemoInfo.DataSize);
 	PACKFILE_WRITE out = { {
-		DemoInfo,
-		std::span<INPUT_BITS>{ DemoBuffer, demo_size },
+		std::span(&DemoInfo, 1), std::span(DemoBuffer, demo_size),
 	} };
 
 	const auto fn = ReplayFN(GameStage);

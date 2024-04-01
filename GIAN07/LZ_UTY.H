@@ -7,7 +7,10 @@
 
 #include "platform/buffer.h"
 #include "platform/unicode.h"
+#include "game/endian.h"
 #include <array>
+
+class FILE_STREAM_READ;
 
 // Format
 // ------
@@ -19,14 +22,14 @@ constexpr const std::array<char, 4> PBG_HEADNAME = { 'P', 'B', 'G', 0x1A };
 
 struct PBG_FILEHEAD {
 	std::array<char, PBG_HEADNAME.size()> name = PBG_HEADNAME;
-	fil_checksum_t sum = 0;
-	fil_no_t n = 0;
+	ENDIAN_LITTLE<fil_checksum_t> sum = 0;
+	ENDIAN_LITTLE<fil_no_t> n = 0;
 };
 
 struct PBG_FILEINFO {
-	fil_size_t size_uncompressed;
-	fil_size_t offset;
-	fil_checksum_t checksum_compressed;
+	ENDIAN_LITTLE<fil_size_t> size_uncompressed;
+	ENDIAN_LITTLE<fil_size_t> offset;
+	ENDIAN_LITTLE<fil_checksum_t> checksum_compressed;
 };
 // ------
 
@@ -80,8 +83,8 @@ struct BIT_FILE_READ : public BIT_DEVICE_READ {
 };
 
 struct PACKFILE_READ {
-	const BYTE_BUFFER_OWNED packfile;
-	const std::span<const PBG_FILEINFO> info;
+	BYTE_BUFFER_OWNED packfile;
+	std::span<const PBG_FILEINFO> info;
 
 	PACKFILE_READ(std::nullptr_t null = nullptr) noexcept {
 	}
@@ -94,6 +97,10 @@ struct PACKFILE_READ {
 	}
 
 	BYTE_BUFFER_OWNED MemExpand(fil_no_t filno) const;
+
+	explicit operator bool() const {
+		return packfile.get();
+	}
 };
 
 struct PACKFILE_WRITE {
@@ -103,4 +110,6 @@ struct PACKFILE_WRITE {
 };
 
 BIT_FILE_READ BitFilCreateR(const PATH_LITERAL s);
+PACKFILE_READ FilStartR(BYTE_BUFFER_OWNED packfile);
+PACKFILE_READ FilStartR(std::unique_ptr<FILE_STREAM_READ> stream);
 PACKFILE_READ FilStartR(const PATH_LITERAL s);

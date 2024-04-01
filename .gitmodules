@@ -12,3 +12,19 @@
 	path = libs/tupblocks
 	url = https://github.com/nmlgc/tupblocks
 	shallow = true
+[submodule "libs/BLAKE3"]
+	path = libs/BLAKE3
+	url = https://github.com/BLAKE3-team/BLAKE3
+	shallow = true
+[submodule "libs/dr_libs"]
+	path = libs/dr_libs
+	url = https://github.com/mackron/dr_libs
+	shallow = true
+[submodule "libs/libogg"]
+	path = libs/libogg
+	url = https://github.com/xiph/ogg
+	shallow = true
+[submodule "libs/libvorbis"]
+	path = libs/libvorbis
+	url = https://github.com/xiph/vorbis
+	shallow = true

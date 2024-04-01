@@ -5,7 +5,7 @@
 
 #include "EFFECT.H"
 #include "GIAN.H"
-#include "platform/snd.h"
+#include "game/snd.h"
 
 
 SEFFECT_DATA		SEffect[SEFFECT_MAX];
@@ -136,7 +136,7 @@ void CEffectSet(int x, int y, uint8_t type)
 
 	switch(type){
 		case(CEFC_STAR):
-			SndPlay(SOUND_ID_TAMEFAST);
+			Snd_SEPlay(SOUND_ID_TAMEFAST);
 			ce->rmax = ce->r = 400;
 		break;
 
@@ -229,7 +229,7 @@ void StringEffect3(void)
 }
 
 // 曲名の表示 //
-void SetMusicTitle(int y, std::string_view s)
+void SetMusicTitle(int y, Narrow::string_view s)
 {
 	int	n;
 
@@ -239,17 +239,20 @@ void SetMusicTitle(int y, std::string_view s)
 	}
 	if(n==SEFFECT_MAX) return;
 
+	// Print the ♪ separately, since it can be combined with a music title in
+	// any encoding.
+	const std::array<Narrow::string_view, 2> strs = { "♪ ", s };
+	const auto extent = DrawGrdFont(MTitleRect, strs);
+
 	// 曲のタイトルが長すぎる場合、どうしましょう？ //
-	auto x = (640 - 128 - 16 - (9 * min(s.length(), (23 + 1))));
+	auto x = (std::max)((640 - 128 - 32 - extent.w), 128);
 
 	SEffect[n].cmd  = SEFC_MTITLE1;
 	SEffect[n].x    = (x<<6);// + (64*2)*16;
 	SEffect[n].y    = y<<6;
 	SEffect[n].time = 64*2;
-	SEffect[n].vx   = (s.length() * 16);
-	SEffect[n].vy   = 16;
-
-	DrawGrdFont(MTitleRect, s);
+	SEffect[n].vx   = extent.w;
+	SEffect[n].vy   = extent.h;
 }
 
 // エフェクトを動かす(仕様変更の可能性があります) //
@@ -630,7 +633,7 @@ void ObjectLockOn(int *x, int *y, int wx64, int hx64)
 	l->count = 30;
 
 	l->state = LOCKON_01;
-	//SndPlay(SOUND_ID_SELECT);
+	// Snd_SEPlay(SOUND_ID_SELECT);
 }
 
 // ロックオンアニメーション動作 //
@@ -699,7 +702,7 @@ void ObjectLockDraw(void)
 
 
 #include "DirectXUTYs/DD_GRP3D.H"
-#include "DirectXUTYs/PBGMIDI.H"
+#include "game/midi.h"
 // スペアナ描画 //
 void GrpDrawSpect(int x, int y)
 {

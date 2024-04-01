@@ -21,9 +21,9 @@
 #include "GIAN07/CONFIG.H"
 #include "GIAN07/ENTRY.H"
 #include "GIAN07/GAMEMAIN.H"
-#include "DirectXUTYs/PBGMIDI.H"
 #include "platform/input.h"
-#include "platform/snd.h"
+#include "platform/snd_backend.h"
+#include "game/bgm.h"
 #include "game/defer.h"
 #include "strings/title.h"
 
@@ -75,13 +75,13 @@ int Run()
 			case SDL_WINDOWEVENT: {
 				switch(event.window.event) {
 				case SDL_WINDOWEVENT_FOCUS_LOST:
-					Mid_Stop();
-					SndPauseAll();
+					BGM_Pause();
+					SndBackend_PauseAll();
 					active = false;
 					break;
 				case SDL_WINDOWEVENT_FOCUS_GAINED:
-					Mid_Play();
-					SndResumeAll();
+					BGM_Resume();
+					SndBackend_ResumeAll();
 					active = true;
 					break;
 				default:

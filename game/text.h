@@ -8,6 +8,7 @@
 #include "game/coords.h"
 #include "game/enum_array.h"
 #include "game/graphics.h"
+#include "game/narrow.h"
 #include <optional>
 #include <string_view>
 
@@ -19,12 +20,18 @@ template <class T, class FontID> concept TEXTRENDER_SESSION = (
 	ENUMARRAY_ID<FontID> && requires (
 		T t,
 		PIXEL_POINT topleft_rel,
-		std::string_view str,
+		Narrow::string_view str,
 		RGBA color,
 		FontID font
 	) {
+		{ t.rect } -> std::same_as<const PIXEL_LTWH&>;
+
 		t.SetFont(font);
 		t.SetColor(color);
+
+		// Calculates the width and height of [str] as rendered with the
+		// current font.
+		{ t.Extent(str) } -> std::same_as<PIXEL_SIZE>;
 
 		// Text display with the current color and font. [str] can be either
 		// UTF-8 or Shift-JIS.
@@ -37,6 +44,11 @@ template <class T, class FontID> concept TEXTRENDER_SESSION = (
 		t.Put(topleft_rel, str, color);
 	}
 );
+
+// Horizontally [str] on [s]'s rectangle.
+PIXEL_COORD TextLayoutXCenter(auto& s, Narrow::string_view str) {
+	return ((s.rect.w - s.Extent(str).w) / 2);
+}
 
 // Concept that describes valid text rendering session functors in game code.
 template <typename F, class Session, class FontID>
@@ -58,9 +70,10 @@ template <class FontID> struct TEXTRENDER_SESSION_FUNC_ARCHETYPE {
 // Concept for a text rendering backend.
 template <class T, class FontID> concept TEXTRENDER = requires(
 	T t,
+	FontID font,
 	PIXEL_SIZE size,
 	WINDOW_POINT dst,
-	std::string_view contents,
+	Narrow::string_view contents,
 	TEXTRENDER_RECT_ID rect_id,
 	TEXTRENDER_SESSION_FUNC_ARCHETYPE<FontID>& func,
 	std::optional<PIXEL_LTWH> subrect
@@ -84,6 +97,10 @@ template <class T, class FontID> concept TEXTRENDER = requires(
 	// the surface with the necessary size, but retaining all registered
 	// rectangles. Necessary for mode switches.
 	t.WipeBeforeNextRender();
+
+	// Calculates the width and height of [contents] as rendered with the given
+	// font.
+	{ t.TextExtent(font, contents) } -> std::same_as<PIXEL_SIZE>;
 
 	// Retained interface
 	// ------------------

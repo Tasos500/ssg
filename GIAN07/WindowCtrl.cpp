@@ -10,9 +10,14 @@
 #include "LEVEL.H"
 #include "LOADER.H"
 #include "DirectXUTYs/DD_UTY.H"
-#include "DirectXUTYs/PBGMIDI.H"
-#include "platform/snd.h"
 #include "platform/input.h"
+#include "platform/midi_backend.h"
+#include "platform/input.h"
+#include "platform/urlopen.h"
+#include "game/bgm.h"
+#include "game/midi.h"
+#include "game/snd.h"
+#include "game/string_format.h"
 #include <numeric>
 
 
@@ -33,8 +38,12 @@ static bool GrpFnSkip(INPUT_BITS key);
 static bool GrpFnBpp(INPUT_BITS key);
 static bool GrpFnWinLocate(INPUT_BITS key);
 
-static bool SndFnWAVE(INPUT_BITS key);
-static bool SndFnMIDI(INPUT_BITS key);
+static bool SndFnSE(INPUT_BITS key);
+static bool SndFnBGM(INPUT_BITS key);
+static bool SndFnSEVol(INPUT_BITS key);
+static bool SndFnBGMVol(INPUT_BITS key);
+static bool SndFnBGMGain(INPUT_BITS key);
+static bool SndFnBGMPack(INPUT_BITS key);
 static bool SndFnMIDIDev(INPUT_BITS key);
 
 static bool InpFnMsgSkip(INPUT_BITS key);
@@ -61,12 +70,12 @@ static bool ContinueFnNo(INPUT_BITS key);
 
 static bool ScoreFn(INPUT_BITS key);
 
-static bool SetDifItem(void);
-static bool SetGrpItem(void);
+static void SetDifItem(void);
+static void SetGrpItem(void);
 static void SetSndItem(void);
 static void SetInpItem(void);
 static void SetIKeyItem(void);
-static bool SetCfgRepItem(void);
+static void SetCfgRepItem(void);
 
 static bool RFnStg1(INPUT_BITS key);
 static bool RFnStg2(INPUT_BITS key);
@@ -77,32 +86,23 @@ static bool RFnStg6(INPUT_BITS key);
 static bool RFnStgEx(INPUT_BITS key);
 
 static bool RingFN(
-	bool onchange(void), uint8_t& var, INPUT_BITS key, uint8_t min, uint8_t max
+	void setitem(void), uint8_t& var, INPUT_BITS key, uint8_t min, uint8_t max
 )
 {
-	switch(key) {
-	case(KEY_BOMB):
-	case(KEY_ESC):
-		return false;
-
-	case(KEY_RETURN):
-	case(KEY_TAMA):
-	case(KEY_RIGHT):
-		var = ((var == max) ? min : (var + 1));
-		break;
-
-	case(KEY_LEFT):
-		var = ((var <= min) ? max : (var - 1));
-		break;
-	}
-	return onchange();
+	return OptionFN(key, setitem, [&]() {
+		if(key == KEY_LEFT) {
+			var = ((var <= min) ? max : (var - 1));
+		} else {
+			var = ((var == max) ? min : (var + 1));
+		}
+	});
 }
 
 template <size_t N> struct LABELS {
-	const std::array<std::string_view, N> str;
+	const std::array<Narrow::string_view, N> str;
 	const size_t w;
 
-	constexpr LABELS(std::array<std::string_view, N> strs) :
+	constexpr LABELS(std::array<Narrow::string_view, N> strs) :
 		str(strs),
 		w(std::reduce(
 			strs.begin(), strs.end(), size_t{}, [](auto cur, const auto& str) {
@@ -115,114 +115,161 @@ template <size_t N> struct LABELS {
 
 
 ///// [グローバル変数(公開せず)] /////
+static constexpr const char* CHOICE_OFF_ON[2]  = { "[O F F]", "[ O N ]" };
+static constexpr const char* CHOICE_OFF_ON_NARROW[2]  = { "[  ]", "[●]" };
+static constexpr const char* CHOICE_USE[2] = { " 使用する ", "使用しない" };
+
+namespace BGMPack {
+	void Open(void);
+
+	constexpr const char* SOUNDTRACK_URL = (
+		"https://github.com/nmlgc/BGMPacks/releases/tag/P0269"
+	);
+	constexpr const char* HELP_DOWNLOAD = (
+		"収録のサントラをダウンロードします"
+	);
+	constexpr const char* HELP_SET = "BGMパックのメニューを開きます";
+
+	constexpr Narrow::string_view TITLE = " BGM pack";
+	constexpr Narrow::string_view TITLE_FMT = " BGM pack (%zu/%zu)";
+	constexpr Narrow::string_view TITLE_NONE = "<使用しない>";
+	constexpr Narrow::string_view TITLE_DOWNLOAD = "<Download>";
+	constexpr auto HELP_NONE = "デフォルトのMIDIサントラに戻ります";
+
+	char Title[TITLE_FMT.size() + (STRING_NUM_CAP<size_t> * 2)];
+
+	std::vector<std::u8string> Packs;
+	size_t SelAtOpen = 0;
+
+	// Scroll functions
+	// ----------------
+
+	static size_t ListSize(void) {
+		return (1 + Packs.size() + 1);
+	}
+	static void Generate(WINDOW_INFO& ret, size_t generated, size_t selected);
+	static bool Handle(INPUT_BITS key, size_t selected);
+	// ----------------
+}
 
 char	DifTitle[9][20];
-WINDOW_INFO DifItem[9] = {
-	{DifTitle[0],"残り人数?を設定します"		,DifFnPlayerStock,0,0},
-	{DifTitle[1],"ボムの数を設定します"			,DifFnBombStock,0,0},
-	{DifTitle[2],"難易度を設定します"			,DifFnDifficulty,0,0},
+WINDOW_INFO DifItem[] = {
+	{ DifTitle[0],	"残り人数?を設定します",	DifFnPlayerStock },
+	{ DifTitle[1],	"ボムの数を設定します",	DifFnBombStock },
+	{ DifTitle[2],	"難易度を設定します",	DifFnDifficulty },
 #ifdef PBG_DEBUG
-	{"-------------------","",0,0,0},
-	{DifTitle[4],"[DebugMode] 画面に情報を表示するか"	,DifFnMsgDisplay,0,0},
-	{DifTitle[5],"[DebugMode] ステージセレクト"			,DifFnStgSelect,0,0},
-	{DifTitle[6],"[DebugMode] 当たり判定"				,DifFnHit,0,0},
-	{DifTitle[7],"[DebugMode] デモプレイセーブ"			,DifFnDemo,0,0},
+	{ "-------------------" },
+	{ DifTitle[4],	"[DebugMode] 画面に情報を表示するか",	DifFnMsgDisplay },
+	{ DifTitle[5],	"[DebugMode] ステージセレクト",	DifFnStgSelect },
+	{ DifTitle[6],	"[DebugMode] 当たり判定",	DifFnHit },
+	{ DifTitle[7],	"[DebugMode] デモプレイセーブ",	DifFnDemo },
 #endif
-	{"Exit"		,"一つ前のメニューにもどります"	,CWinExitFn,0,0},
+	{ "Exit",	"一つ前のメニューにもどります",	CWinExitFn },
 };
 
 char	GrpTitle[5][50];
-WINDOW_INFO GrpItem[5] = {
-	{GrpTitle[0],"ビデオカードの選択"				,GrpFnChgDevice,0,0},
-	{GrpTitle[1],"描画スキップの設定です"			,GrpFnSkip,0,0},
-	{GrpTitle[2],"使用する色数を指定します"			,GrpFnBpp,0,0},
-	{GrpTitle[3],"ウィンドウの表示位置を決めます"	,GrpFnWinLocate,0,0},
-	{"Exit"		,"一つ前のメニューにもどります"		,CWinExitFn,0,0},
+WINDOW_INFO GrpItem[] = {
+	// { GrpTitle[0],	"ビデオカードの選択",	GrpFnChgDevice },
+	{ GrpTitle[1],	"描画スキップの設定です",	GrpFnSkip },
+	{ GrpTitle[2],	"使用する色数を指定します",	GrpFnBpp },
+	{ GrpTitle[3],	"ウィンドウの表示位置を決めます",	GrpFnWinLocate },
+	{ "Exit",	"一つ前のメニューにもどります",	CWinExitFn },
 };
 
-char	SndTitle[4][24];
-WINDOW_INFO SndItem[4] = {
-	{SndTitle[0],"WAVEを鳴らすかどうかの設定"	,SndFnWAVE,0,0},
-	{SndTitle[1],"MIDIを鳴らすかどうかの設定"	,SndFnMIDI,0,0},
-	{SndTitle[2],"MIDI Port (保存はされません)"	,SndFnMIDIDev,0,0},
-	{"Exit"		,"一つ前のメニューにもどります"	,CWinExitFn,0,0},
+constexpr auto VOLUME_FLAGS = WINDOW_INFO::FLAGS::FAST_REPEAT;
+
+static char SndTitleSE[26];
+static char SndTitleBGM[26];
+static char SndTitleSEVol[26];
+static char SndTitleBGMVol[26];
+static char SndTitleBGMGain[26];
+static char SndTitleBGMPack[26];
+static char SndTitleMIDIPort[26];
+WINDOW_INFO SndItem[] = {
+	{ SndTitleSE,	"SEを鳴らすかどうかの設定",	SndFnSE },
+	{ SndTitleBGM,	"BGMを鳴らすかどうかの設定",	SndFnBGM },
+	{ SndTitleSEVol, "効果音の音量", SndFnSEVol, VOLUME_FLAGS },
+	{ SndTitleBGMVol, "音楽の音量", SndFnBGMVol, VOLUME_FLAGS },
+	{ SndTitleBGMGain,	"毎に曲から音量の違うことが外します",	SndFnBGMGain },
+	{ SndTitleBGMPack,	BGMPack::HELP_DOWNLOAD,	SndFnBGMPack },
+	{ SndTitleMIDIPort,	"MIDI Port (保存はされません)",	SndFnMIDIDev },
+	{ "Exit",	"一つ前のメニューにもどります",	CWinExitFn },
 };
+static auto& SndItemSE = SndItem[0];
+static auto& SndItemBGM = SndItem[1];
+static auto& SndItemSEVol = SndItem[2];
+static auto& SndItemBGMVol = SndItem[3];
+static auto& SndItemBGMGain = SndItem[4];
+static auto& SndItemBGMPack = SndItem[5];
+static auto& SndItemMIDIPort = SndItem[6];
 
 char IKeyTitle[4][20];
 char InpHelp[] = "パッド上のボタンを押すと変更";
-WINDOW_INFO InpKey[5] = {
-	{IKeyTitle[0],InpHelp, InpFnKeyTama,0,0},
-	{IKeyTitle[1],InpHelp, InpFnKeyBomb,0,0},
-	{IKeyTitle[2],InpHelp, InpFnKeyShift,0,0},
-	{IKeyTitle[3],InpHelp, InpFnKeyCancel,0,0},
-	{" Exit"		,"一つ前のメニューにもどります"	,CWinExitFn,0,0},
+WINDOW_INFO InpKey[] = {
+	{ IKeyTitle[0],	InpHelp,	InpFnKeyTama },
+	{ IKeyTitle[1],	InpHelp,	InpFnKeyBomb },
+	{ IKeyTitle[2],	InpHelp,	InpFnKeyShift },
+	{ IKeyTitle[3],	InpHelp,	InpFnKeyCancel },
+	{ " Exit",	"一つ前のメニューにもどります",	CWinExitFn },
 };
 
 char	InpTitle[23];
 char	InpTitle2[23];
-WINDOW_INFO	InpItem[4] = {
-	{InpTitle, "弾キーのメッセージスキップ設定"	,InpFnMsgSkip,0,0},
-	{InpTitle2,"弾キーの押しっぱなしで低速移動", InpFnZSpeedDown, 0, 0},
-//		8,InpKey,InpKey+1,InpKey+2,InpKey+3,InpKey+4,InpKey+5,InpKey+6,InpKey+7},
-	{"Joy Pad"	,"パッドの設定をします"		,0,5,InpKey,InpKey+1,InpKey+2,InpKey+3,InpKey+4},
-	{"Exit"		,"一つ前のメニューにもどります"	,CWinExitFn,0,0},
+WINDOW_INFO InpItem[] = {
+	{ InpTitle,	"弾キーのメッセージスキップ設定",	InpFnMsgSkip },
+	{ InpTitle2,	"弾キーの押しっぱなしで低速移動",	InpFnZSpeedDown },
+	{ "Joy Pad",	"パッドの設定をします",	InpKey },
+	{ "Exit",	"一つ前のメニューにもどります",	CWinExitFn },
 };
 
 
 char CfgRepTitle[2][23];
 
-WINDOW_INFO CfgRep[3] = {
-	{CfgRepTitle[0], "リプレイ用データの保存", CfgRepSave, 0, 0},
-	{CfgRepTitle[1], "ステージセレクト"      , CfgRepStgSelect, 0, 0},
-	{"Exit"		,"一つ前のメニューにもどります"	,CWinExitFn,0,0},
+WINDOW_INFO CfgRep[] = {
+	{ CfgRepTitle[0],	"リプレイ用データの保存",	CfgRepSave },
+	{ CfgRepTitle[1],	"ステージセレクト",	CfgRepStgSelect },
+	{ "Exit",	"一つ前のメニューにもどります",	CWinExitFn },
 };
 
-WINDOW_INFO CfgItem[6] = {
-	{" Difficulty"	,"難易度に関する設定"
-#ifdef PBG_DEBUG
-		,0,9,DifItem,DifItem+1,DifItem+2,DifItem+3,DifItem+4,DifItem+5,DifItem+6,DifItem+7,DifItem+8},
-#else
-		,0,4,DifItem,DifItem+1,DifItem+2,DifItem+3,DifItem+4},
-#endif
-
-	{" Graphic"		,"グラフィックに関する設定"		,0,5-1,/*GrpItem,*/GrpItem+1,GrpItem+2,GrpItem+3,GrpItem+4},
-	{" Sound / Music"	,"ＳＥ／ＭＩＤＩに関する設定"	,0,4,SndItem,SndItem+1,SndItem+2,SndItem+3},
-	{" Input"		,"入力デバイスに関する設定"		,0,4,InpItem,InpItem+1,InpItem+2,InpItem+3},
-	{" Replay", "リプレイに関する設定", 0, 3, CfgRep, CfgRep+1, CfgRep+2},
-	{" Exit"			,"一つ前のメニューにもどります"	,CWinExitFn,0,0},
+WINDOW_INFO CfgItem[] = {
+	{ " Difficulty",	"難易度に関する設定",	DifItem },
+	{ " Graphic",	"グラフィックに関する設定",	GrpItem },
+	{ " Sound / Music",	"ＳＥ／ＢＧＭに関する設定",	SndItem },
+	{ " Input",	"入力デバイスに関する設定",	InpItem },
+	{ " Replay",	"リプレイに関する設定",	CfgRep },
+	{ " Exit",	"一つ前のメニューにもどります",	CWinExitFn },
 };
 
-WINDOW_INFO RepItem[8] = {
-	{" Stage 1 デモ再生", "ステージ１のリプレイ", RFnStg1, 0, 0},
-	{" Stage 2 デモ再生", "ステージ２のリプレイ", RFnStg2, 0, 0},
-	{" Stage 3 デモ再生", "ステージ３のリプレイ", RFnStg3, 0, 0},
-	{" Stage 4 デモ再生", "ステージ４のリプレイ", RFnStg4, 0, 0},
-	{" Stage 5 デモ再生", "ステージ５のリプレイ", RFnStg5, 0, 0},
-	{" Stage 6 デモ再生", "ステージ６のリプレイ", RFnStg6, 0, 0},
-	{" ExStage デモ再生", "エキストラステージのリプレイ", RFnStgEx, 0, 0},
-	{" Exit"	  ,"一つ前のメニューにもどります"	,CWinExitFn,0,0},
+WINDOW_INFO RepItem[] = {
+	{ " Stage 1 デモ再生",	"ステージ１のリプレイ",	RFnStg1 },
+	{ " Stage 2 デモ再生",	"ステージ２のリプレイ",	RFnStg2 },
+	{ " Stage 3 デモ再生",	"ステージ３のリプレイ",	RFnStg3 },
+	{ " Stage 4 デモ再生",	"ステージ４のリプレイ",	RFnStg4 },
+	{ " Stage 5 デモ再生",	"ステージ５のリプレイ",	RFnStg5 },
+	{ " Stage 6 デモ再生",	"ステージ６のリプレイ",	RFnStg6 },
+	{ " ExStage デモ再生",	"エキストラステージのリプレイ",	RFnStgEx },
+	{ " Exit",	"一つ前のメニューにもどります",	CWinExitFn },
 };
 
-WINDOW_INFO MainItem[7] = {
-//	{"   Game  Start"	,"ゲームを開始します(使用不可)",0,0,0},
-	{"   Game  Start"	,"ゲームを開始します"		,MainFnGameStart,0,0},
-	{"   Extra Start"	,"ゲームを開始します(Extra)",MainFnExStart,0,0},
-	{"   Replay"		,"リプレイを開始します"		,0,8,RepItem,RepItem+1,RepItem+2,RepItem+3,RepItem+4,RepItem+5,RepItem+6,RepItem+7},
-	{"   Config"		,"各種設定を変更します"		,0,6,CfgItem,CfgItem+1,CfgItem+2,CfgItem+3,CfgItem+4,CfgItem+5},
-	{"   Score"			,"スコアの表示をします"		,ScoreFn,0,0},
-	{"   Music"			,"音楽室に入ります"			,MusicFn,0,0},
-//	{"   Exit"			,"ゲームを終了します"		,CWinExitFn,0,0}
-	{"   Exit"			,"ゲームを終了します"		,CWinExitFn,0,0}
+WINDOW_INFO MainItem[] = {
+	// { "   Game  Start",	"ゲームを開始します(使用不可)" },
+	{ "   Game  Start",	"ゲームを開始します",	MainFnGameStart },
+	{ "   Extra Start",	"ゲームを開始します(Extra)",	MainFnExStart },
+	{ "   Replay",	"リプレイを開始します",	RepItem },
+	{ "   Config",	"各種設定を変更します",	CfgItem },
+	{ "   Score",	"スコアの表示をします",	ScoreFn },
+	{ "   Music",	"音楽室に入ります",	MusicFn },
+	{ "   Exit",	"ゲームを終了します",	CWinExitFn }
 };
 
-WINDOW_INFO ExitYesNoItem[2] = {
-	{"   お っ け ～ ","",ExitFnYes,0,0},
-	{"   だ め だ め","",ExitFnNo ,0,0}
+WINDOW_INFO ExitYesNoItem[] = {
+	{ "   お っ け ～ ",	"",	ExitFnYes },
+	{ "   だ め だ め",	"",	ExitFnNo }
 };
 
-WINDOW_INFO ContinueYesNoItem[2] = {
-	{"   お っ け ～","",ContinueFnYes,0,0},
-	{"   や だ や だ","",ContinueFnNo ,0,0}
+WINDOW_INFO ContinueYesNoItem[] = {
+	{ "   お っ け ～",	"",	ContinueFnYes },
+	{ "   や だ や だ",	"",	ContinueFnNo }
 };
 
 
@@ -230,23 +277,16 @@ WINDOW_INFO ContinueYesNoItem[2] = {
 WINDOW_SYSTEM MainWindow;
 WINDOW_SYSTEM ExitWindow;
 WINDOW_SYSTEM ContinueWindow;
+WINDOW_SYSTEM BGMPackWindow;
+WINDOW_SCROLL<
+	BGMPackWindow, BGMPack::ListSize, BGMPack::Generate, BGMPack::Handle
+> BGMPackScroll;
 
 
 
 // メインメニューの初期化 //
 void InitMainWindow(void)
 {
-	int			i;
-
-	MainWindow.Parent.Title      = "     Main Menu";
-	MainWindow.Parent.Help       = " ";			// ここは指定しても意味がない
-	MainWindow.Parent.NumItems   = 7;
-	MainWindow.Parent.CallBackFn = NULL;
-
-	for(i=0;i<MainWindow.Parent.NumItems;i++){
-		MainWindow.Parent.ItemPtr[i] = &MainItem[i];
-	}
-
 	SetDifItem();
 	SetGrpItem();
 	SetSndItem();
@@ -254,7 +294,9 @@ void InitMainWindow(void)
 	SetIKeyItem();
 	SetCfgRepItem();
 
-//	{"   Config"		,"各種設定を変更します"		,0,6,CfgItem,CfgItem+1,CfgItem+2,CfgItem+3,CfgItem+4,CfgItem+5},
+	MainWindow.Init("     Main Menu", MainItem, 140);
+
+	//	{ "   Config",	"各種設定を変更します",	CfgItem },
 
 	// エキストラステージが選択できる場合には発生！ //
 	if(ConfigDat.ExtraStgFlags.v) {
@@ -266,35 +308,17 @@ void InitMainWindow(void)
 		MainItem[3].NumItems = 5;
 		MainItem[3].ItemPtr[4] = CfgItem + 5;
 	}
-
-	MainWindow.Init(140);
 }
 
 
 void InitExitWindow(void)
 {
-	ExitWindow.Parent.Title     = "    終了するの？";
-	ExitWindow.Parent.Help      = " ";
-	ExitWindow.Parent.NumItems  = 2;
-	ExitWindow.Parent.CallBackFn = NULL;
-
-	ExitWindow.Parent.ItemPtr[0] = &ExitYesNoItem[0];
-	ExitWindow.Parent.ItemPtr[1] = &ExitYesNoItem[1];
-
-	ExitWindow.Init(140);
+	ExitWindow.Init("    終了するの？", ExitYesNoItem, 140);
 }
 
 void InitContinueWindow(void)
 {
-	ContinueWindow.Parent.Title     = " Ｃｏｎｔｉｎｕｅ？";
-	ContinueWindow.Parent.Help      = " ";
-	ContinueWindow.Parent.NumItems  = 2;
-	ContinueWindow.Parent.CallBackFn = NULL;
-
-	ContinueWindow.Parent.ItemPtr[0] = &ContinueYesNoItem[0];
-	ContinueWindow.Parent.ItemPtr[1] = &ContinueYesNoItem[1];
-
-	ContinueWindow.Init(140);
+	ContinueWindow.Init(" Ｃｏｎｔｉｎｕｅ？", ContinueYesNoItem, 140);
 }
 
 static bool DifFnPlayerStock(INPUT_BITS key)
@@ -319,19 +343,9 @@ static bool DifFnDifficulty(INPUT_BITS key)
 #ifdef PBG_DEBUG
 static bool DifFnMsgDisplay(INPUT_BITS key)
 {
-	switch(key){
-		case(KEY_BOMB):case(KEY_ESC):
-		return FALSE;
-
-		case(KEY_RETURN):case(KEY_TAMA):case(KEY_RIGHT):case(KEY_LEFT):
-			if(DebugDat.MsgDisplay) DebugDat.MsgDisplay = false;
-			else                    DebugDat.MsgDisplay = true;
-		break;
-	}
-
-	SetDifItem();
-
-	return TRUE;
+	return OptionFN(key, SetDifItem, [] {
+		DebugDat.MsgDisplay = !DebugDat.MsgDisplay;
+	});
 }
 
 static bool DifFnStgSelect(INPUT_BITS key)
@@ -341,71 +355,41 @@ static bool DifFnStgSelect(INPUT_BITS key)
 
 static bool DifFnHit(INPUT_BITS key)
 {
-	switch(key){
-		case(KEY_BOMB):case(KEY_ESC):
-		return FALSE;
-
-		case(KEY_RETURN):case(KEY_TAMA):case(KEY_RIGHT):case(KEY_LEFT):
-			if(DebugDat.Hit) DebugDat.Hit = false;
-			else             DebugDat.Hit = true;
-		break;
-	}
-
-	SetDifItem();
-
-	return TRUE;
+	return OptionFN(key, SetDifItem, [] {
+		DebugDat.Hit = !DebugDat.Hit;
+	});
 }
 
 static bool DifFnDemo(INPUT_BITS key)
 {
-	switch(key){
-		case(KEY_BOMB):case(KEY_ESC):
-		return FALSE;
-
-		case(KEY_RETURN):case(KEY_TAMA):case(KEY_RIGHT):case(KEY_LEFT):
-			if(DebugDat.DemoSave) DebugDat.DemoSave = false;
-			else                  DebugDat.DemoSave = true;
-		break;
-	}
-
-	SetDifItem();
-
-	return TRUE;
+	return OptionFN(key, SetDifItem, [] {
+		DebugDat.DemoSave = !DebugDat.DemoSave;
+	});
 }
 
 #endif // PBG_DEBUG
 
 static bool GrpFnChgDevice(INPUT_BITS key)
 {
-	int				flag = 0;
+	return OptionFN(key, SetGrpItem, [&]() {
+		int flag = ((key == KEY_LEFT) ? -1 : 2);
+		// 一つしかデバイスが存在しないときは変更できない //
+		if(DxEnumNow <= 1) {
+			return;
+		}
 
-	switch(key){
-		case(KEY_BOMB):case(KEY_ESC):
-		return FALSE;
+		// 次のデバイスへ //
+		uint8_t device_id_new = (
+			(ConfigDat.DeviceID.v + DxEnumNow + flag) % DxEnumNow
+		);
 
-		case(KEY_RETURN):case(KEY_TAMA):case(KEY_RIGHT):	flag = 2;
-		case(KEY_LEFT):										flag -= 1;
-
-			// 一つしかデバイスが存在しないときは変更できない //
-			if(DxEnumNow<=1) break;
-
-			// 次のデバイスへ //
-			uint8_t device_id_new = (
-				(ConfigDat.DeviceID.v + DxEnumNow + flag) % DxEnumNow
-			);
-
-			// この部分に本当ならエラーチェックが必要(後で関数化しろよ) //
-			TextObj.WipeBeforeNextRender();
-			if(DxObj.Init(device_id_new, ConfigDat.BitDepth.v)) {
-				ConfigDat.DeviceID.v = device_id_new;
-				//GrpSetClip(X_MIN,Y_MIN,X_MAX,Y_MAX);
-			}
-		break;
-	}
-
-	SetGrpItem();
-
-	return TRUE;
+		// この部分に本当ならエラーチェックが必要(後で関数化しろよ) //
+		TextObj.WipeBeforeNextRender();
+		if(DxObj.Init(device_id_new, ConfigDat.BitDepth.v)) {
+			ConfigDat.DeviceID.v = device_id_new;
+			// GrpSetClip(X_MIN,Y_MIN,X_MAX,Y_MAX);
+		}
+	});
 }
 
 static bool GrpFnSkip(INPUT_BITS key)
@@ -415,29 +399,19 @@ static bool GrpFnSkip(INPUT_BITS key)
 
 static bool GrpFnBpp(INPUT_BITS key)
 {
-	switch(key){
-		case(KEY_BOMB):case(KEY_ESC):
-		return FALSE;
+	return OptionFN(key, SetGrpItem, [&]() {
+		auto bitdepth_new = ConfigDat.BitDepth.v.cycle(key == KEY_LEFT);
 
-		case(KEY_RETURN):case(KEY_TAMA):case(KEY_RIGHT):case(KEY_LEFT): {
-			auto bitdepth_new = ConfigDat.BitDepth.v.cycle(key == KEY_LEFT);
+		// この部分に本当ならエラーチェックが必要 //
+		TextObj.WipeBeforeNextRender();
+		if(DxObj.Init(ConfigDat.DeviceID.v, bitdepth_new)) {
+			ConfigDat.BitDepth.v = bitdepth_new;
+			// GrpSetPalette(DxObj.pe);
+			LoadPaletteFrom(GrTitle);
 
-			// この部分に本当ならエラーチェックが必要 //
-			TextObj.WipeBeforeNextRender();
-			if(DxObj.Init(ConfigDat.DeviceID.v, bitdepth_new)) {
-				ConfigDat.BitDepth.v = bitdepth_new;
-				//GrpSetPalette(DxObj.pe);
-				LoadPaletteFrom(GrTitle);
-
-				//GrpSetClip(X_MIN,Y_MIN,X_MAX,Y_MAX);
-			}
-		break;
+			// GrpSetClip(X_MIN,Y_MIN,X_MAX,Y_MAX);
 		}
-	}
-
-	SetGrpItem();
-
-	return TRUE;
+	});
 }
 
 static bool GrpFnWinLocate(INPUT_BITS key)
@@ -450,154 +424,200 @@ static bool GrpFnWinLocate(INPUT_BITS key)
 	}
 	if(i >= 3) i=0;
 
-	switch(key){
-		case(KEY_BOMB):case(KEY_ESC):
-		return FALSE;
-
-		case(KEY_RETURN):case(KEY_TAMA):case(KEY_RIGHT):
-			ConfigDat.GraphFlags.v = flags[(i + 1) % 3];
-		break;
-/*
-			if(ConfigDat.GraphFlags.v & GRPF_WINDOW_UPPER) {
-				ConfigDat.GraphFlags.v &= (~GRPF_WINDOW_UPPER);
-			} else {
-				ConfigDat.GraphFlags.v |= GRPF_WINDOW_UPPER;
-			}
-		break;
-*/
-		case(KEY_LEFT):
+	return OptionFN(key, SetGrpItem, [&] {
+		if(key == KEY_LEFT) {
 			ConfigDat.GraphFlags.v = flags[(i + 2) % 3];
-		break;
-	}
-
-	SetGrpItem();
-
-	return TRUE;
+		} else {
+			ConfigDat.GraphFlags.v = flags[(i + 1) % 3];
+		}
+	});
 }
 
-static bool SndFnWAVE(INPUT_BITS key)
+static bool SndFnSE(INPUT_BITS key)
 {
-	switch(key){
-		case(KEY_BOMB):case(KEY_ESC):
-		return FALSE;
+	return OptionFN(key, SetSndItem, [] {
+		//extern INPUT_OBJ InputObj;
+		//char buf[100];
+		//sprintf(buf,"[1] DI:%x  Dev:%x",InputObj.pdi,InputObj.pdev);
+		// DebugOut(buf);
 
-		case(KEY_RETURN):case(KEY_TAMA):case(KEY_RIGHT):case(KEY_LEFT):
-			//extern INPUT_OBJ InputObj;
-			//char buf[100];
-			//sprintf(buf,"[1] DI:%x  Dev:%x",InputObj.pdi,InputObj.pdev);
-			//DebugOut(buf);
-
-			if(ConfigDat.SoundFlags.v & SNDF_WAVE_ENABLE) {
-				ConfigDat.SoundFlags.v &= (~SNDF_WAVE_ENABLE);
-				SndCleanup();
-			}
-			else{
-				ConfigDat.SoundFlags.v |= SNDF_WAVE_ENABLE;
-
-				if(!SndInit()) {
-					ConfigDat.SoundFlags.v &= (~SNDF_WAVE_ENABLE);
-				} else if(!LoadSound()) {
-					ConfigDat.SoundFlags.v &= (~SNDF_WAVE_ENABLE);
-					SndCleanup();
-				}
-			}
-			//sprintf(buf,"[2] DI:%x  Dev:%x",InputObj.pdi,InputObj.pdev);
-			//DebugOut(buf);
-		break;
-	}
-
-	SetSndItem();
-
-	return TRUE;
+		if(ConfigDat.SoundFlags.v & SNDF_SE_ENABLE) {
+			ConfigDat.SoundFlags.v &= (~SNDF_SE_ENABLE);
+			Snd_SECleanup();
+		} else {
+			ConfigDat.SoundFlags.v |= SNDF_SE_ENABLE;
+			LoadSound();
+		}
+		//sprintf(buf,"[2] DI:%x  Dev:%x",InputObj.pdi,InputObj.pdev);
+		// DebugOut(buf);
+	});
 }
 
-static bool SndFnMIDI(INPUT_BITS key)
+static bool SndFnBGM(INPUT_BITS key)
 {
-	switch(key){
-		case(KEY_BOMB):case(KEY_ESC):
-		return FALSE;
+	return OptionFN(key, SetSndItem, [] {
+		if(BGM_Enabled()) {
+			BGM_Cleanup();
+		} else {
+			// 成功した場合にだけ有効にする //
+			if(BGM_Init()) {
+				BGM_Switch(0);
+			}
+		}
+	});
+}
 
-		case(KEY_RETURN):case(KEY_TAMA):case(KEY_RIGHT):case(KEY_LEFT):
-			if(ConfigDat.SoundFlags.v & SNDF_MIDI_ENABLE) {
-				Mid_End();
-				ConfigDat.SoundFlags.v &= (~SNDF_MIDI_ENABLE);
-			}
-			else{
-				// 成功した場合にだけ有効にする //
-				if(Mid_Start(MIDFN_CALLBACK,MIDPL_NORM)){
-					ConfigDat.SoundFlags.v |= SNDF_MIDI_ENABLE;
-				}
-			}
-		break;
+static bool SndFnSEVol(INPUT_BITS key)
+{
+	if(const auto delta = CWinOptionKeyDelta(key)) {
+		ConfigDat.SEVolume.v = std::clamp(
+			(ConfigDat.SEVolume.v + delta), 0, int(VOLUME_MAX)
+		);
+		Snd_UpdateVolumes();
+	}
+	SetSndItem();
+	return ((key != KEY_BOMB) && (key != KEY_ESC));
+}
+
+static bool SndFnBGMVol(INPUT_BITS key)
+{
+	if(const auto delta = CWinOptionKeyDelta(key)) {
+		ConfigDat.BGMVolume.v = std::clamp(
+			(ConfigDat.BGMVolume.v + delta), 0, int(VOLUME_MAX)
+		);
+		BGM_UpdateVolume();
+	}
+	SetSndItem();
+	return ((key != KEY_BOMB) && (key != KEY_ESC));
+}
+
+static bool SndFnBGMPack(INPUT_BITS key)
+{
+	return OptionFN(key, SetSndItem, [] {
+		if(!BGM_PacksAvailable()) {
+			URLOpen(BGMPack::SOUNDTRACK_URL);
+		} else {
+			BGMPack::Open();
+		}
+	});
+}
+
+static bool SndFnBGMGain(INPUT_BITS key)
+{
+	return OptionFN(key, SetSndItem, [] {
+		BGM_SetGainApply(!BGM_GainApply());
+	});
+}
+
+namespace BGMPack {
+	size_t SelNone(void) {
+		return 0;
+	}
+	size_t SelDownload(void) {
+		return (ListSize() - 1);
 	}
 
-	SetSndItem();
+	static void Open(void)
+	{
+		PIXEL_COORD w = CWinItemExtent(TITLE_FMT).w;
+		w = (std::max)(w, CWinTextExtent(TITLE_DOWNLOAD).w);
+		w = (std::max)(w, CWinTextExtent(TITLE_NONE).w);
+		Packs.clear();
+		Packs.reserve(BGM_PackCount());
+		BGM_PackForeach([](const auto&& str) {
+			Packs.emplace_back(std::move(str));
+		});
+		std::ranges::sort(Packs);
+		SelAtOpen = SelNone();
+		for(size_t i = 1; const auto& pack : Packs) {
+			if(pack == ConfigDat.BGMPack.v) {
+				SelAtOpen = i;
+			}
+			w = (std::max)(w, CWinItemExtent(pack).w);
+			i++;
+		}
+		w = (std::min)(w, 640);
 
-	return TRUE;
+		BGMPackScroll.Init(Title, SelAtOpen, w, &MainWindow);
+		BGMPackWindow.OpenCentered(w, BGMPackWindow.Select[0]);
+	}
+
+	static void Generate(WINDOW_INFO& ret, size_t generated, size_t selected)
+	{
+		const auto sel_none = SelNone();
+		const auto sel_download = SelDownload();
+		if(generated == sel_none) {
+			ret.Title = TITLE_NONE.data();
+			ret.Help = HELP_NONE;
+		} else if(generated == sel_download) {
+			ret.Title = TITLE_DOWNLOAD.data();
+			ret.Help = HELP_DOWNLOAD;
+		} else {
+			ret.Title = Packs[generated - 1];
+			ret.Help = "";
+		}
+		ret.State = ((generated == SelAtOpen)
+			? WINDOW_INFO::STATE::HIGHLIGHT
+			: WINDOW_INFO::STATE::REGULAR
+		);
+		if(generated == selected) {
+			if((generated == sel_none) || (generated == sel_download)) {
+				std::ranges::copy(TITLE, Title).out[0] = '\0';
+			} else {
+				sprintf(Title, TITLE_FMT.data(), generated, Packs.size());
+			}
+		}
+	}
+
+	static bool Handle(INPUT_BITS key, size_t selected)
+	{
+		if((key == KEY_TAMA) || (key == KEY_RETURN)) {
+			if(selected == SelDownload()) {
+				URLOpen(BGMPack::SOUNDTRACK_URL);
+			} else {
+				if(selected == SelNone()) {
+					ConfigDat.BGMPack.v.clear();
+				} else {
+					ConfigDat.BGMPack.v = Packs[selected - 1];
+				}
+				SetSndItem();
+				BGM_PackSet(ConfigDat.BGMPack.v);
+			}
+			return false;
+		}
+		return true;
+	}
 }
 
 static bool SndFnMIDIDev(INPUT_BITS key)
 {
-	switch(key){
-		case(KEY_BOMB):case(KEY_ESC):
-		return FALSE;
-
-		case(KEY_RETURN):case(KEY_TAMA):case(KEY_RIGHT):
-			if(ConfigDat.SoundFlags.v & SNDF_MIDI_ENABLE) {
-				Mid_ChgDev(1);
-			}
-		break;
-
-		case(KEY_LEFT):
-			if(ConfigDat.SoundFlags.v & SNDF_MIDI_ENABLE) {
-				Mid_ChgDev(-1);
-			}
-		break;
-	}
-
-	SetSndItem();
-
-	return TRUE;
+	return OptionFN(key, SetSndItem, [&] {
+		if(BGM_Enabled()) {
+			BGM_ChangeMIDIDevice((key == KEY_LEFT) ? -1 : 1);
+		}
+	});
 }
 
 static bool InpFnMsgSkip(INPUT_BITS key)
 {
-	switch(key){
-		case(KEY_BOMB):case(KEY_ESC):
-		return FALSE;
-
-		case(KEY_RETURN):case(KEY_TAMA):case(KEY_RIGHT):case(KEY_LEFT):
-			if(ConfigDat.InputFlags.v & INPF_Z_MSKIP_ENABLE) {
-				ConfigDat.InputFlags.v &= (~INPF_Z_MSKIP_ENABLE);
-			} else {
-				ConfigDat.InputFlags.v |= INPF_Z_MSKIP_ENABLE;
-			}
-		break;
-	}
-
-	SetInpItem();
-
-	return TRUE;
+	return OptionFN(key, SetInpItem, [] {
+		if(ConfigDat.InputFlags.v & INPF_Z_MSKIP_ENABLE) {
+			ConfigDat.InputFlags.v &= (~INPF_Z_MSKIP_ENABLE);
+		} else {
+			ConfigDat.InputFlags.v |= INPF_Z_MSKIP_ENABLE;
+		}
+	});
 }
 
 static bool InpFnZSpeedDown(INPUT_BITS key)
 {
-	switch(key){
-		case(KEY_BOMB):case(KEY_ESC):
-		return FALSE;
-
-		case(KEY_RETURN):case(KEY_TAMA):case(KEY_RIGHT):case(KEY_LEFT):
-			if(ConfigDat.InputFlags.v & INPF_Z_SPDDOWN_ENABLE) {
-				ConfigDat.InputFlags.v &= (~INPF_Z_SPDDOWN_ENABLE);
-			} else {
-				ConfigDat.InputFlags.v |= INPF_Z_SPDDOWN_ENABLE;
-			}
-		break;
-	}
-
-	SetInpItem();
-
-	return TRUE;
+	return OptionFN(key, SetInpItem, [] {
+		if(ConfigDat.InputFlags.v & INPF_Z_SPDDOWN_ENABLE) {
+			ConfigDat.InputFlags.v &= (~INPF_Z_SPDDOWN_ENABLE);
+		} else {
+			ConfigDat.InputFlags.v |= INPF_Z_SPDDOWN_ENABLE;
+		}
+	});
 }
 
 
@@ -686,7 +706,7 @@ static bool MusicFn(INPUT_BITS key)
 {
 	switch(key){
 		case(KEY_RETURN):case(KEY_TAMA):
-			if(ConfigDat.SoundFlags.v & SNDF_MIDI_ENABLE) {
+			if(BGM_Enabled()) {
 				MusicRoomInit();
 			}
 		default:
@@ -786,60 +806,46 @@ static bool CfgRepStgSelect(INPUT_BITS key)
 
 static bool CfgRepSave(INPUT_BITS key)
 {
-	switch(key){
-		case(KEY_BOMB):case(KEY_ESC):
-		return FALSE;
-
-		case(KEY_RETURN):case(KEY_TAMA):case(KEY_RIGHT):case(KEY_LEFT):
-			ConfigDat.StageSelect.v = ((ConfigDat.StageSelect.v) ? 0 : 1);
-		break;
-	}
-
-	SetCfgRepItem();
-
-	return TRUE;
+	return OptionFN(key, SetCfgRepItem, [] {
+		ConfigDat.StageSelect.v = ((ConfigDat.StageSelect.v) ? 0 : 1);
+	});
 }
 
 
-static bool SetCfgRepItem(void)
+static void SetCfgRepItem(void)
 {
-	const char *SWItem[2]  = {"[ O N ]","[O F F]"};
-
 	if(0 == ConfigDat.StageSelect.v) {
-		sprintf(CfgRepTitle[0], "ReplaySave  %s", SWItem[1]);
+		sprintf(CfgRepTitle[0], "ReplaySave  %s", CHOICE_OFF_ON[false]);
 		strcpy(CfgRepTitle[1], "StageSelect [無 効]");
 	}
 	else{
-		sprintf(CfgRepTitle[0], "ReplaySave  %s", SWItem[0]);
+		sprintf(CfgRepTitle[0], "ReplaySave  %s", CHOICE_OFF_ON[true]);
 		sprintf(CfgRepTitle[1], "StageSelect [  %d  ]", ConfigDat.StageSelect.v);
 	}
-	return true;
 }
 
 
-static bool SetDifItem(void)
+static void SetDifItem(void)
 {
 	const char *DifItem[4] = {" Easy  "," Normal"," Hard  ","Lunatic"};
-	const char *SWItem[2]  = {"[ O N ]","[O F F]"};
 /*
-	{DifTitle[4],"[DebugMode] 画面に情報を表示するか"	,DifFnMsgDisplay,0,0},
-	{DifTitle[5],"[DebugMode] ステージセレクト"			,DifFnStgSelect,0,0},
-	{DifTitle[6],"[DebugMode] 当たり判定"				,DifFnHit,0,0},
+	{DifTitle[4],	"[DebugMode] 画面に情報を表示するか",	DifFnMsgDisplay,0,0},
+	{DifTitle[5],	"[DebugMode] ステージセレクト",	DifFnStgSelect,0,0},
+	{DifTitle[6],	"[DebugMode] 当たり判定",	DifFnHit,0,0},
 */
 	sprintf(DifTitle[0], "PlayerStock [ %d ]", (ConfigDat.PlayerStock.v + 1));	// +1 に注意
 	sprintf(DifTitle[1], "BombStock   [ %d ]", ConfigDat.BombStock.v);
 	sprintf(DifTitle[2], "Difficulty[%s]", DifItem[ConfigDat.GameLevel.v]);
 
 #ifdef PBG_DEBUG
-	sprintf(DifTitle[4],"DebugOut  %s",SWItem[DebugDat.MsgDisplay ? 0 : 1]);
-	sprintf(DifTitle[5],"StgSelect [  %d  ]",DebugDat.StgSelect);
-	sprintf(DifTitle[6],"Hit       %s",SWItem[DebugDat.Hit ? 0 : 1]);
-	sprintf(DifTitle[7],"DemoSave  %s",SWItem[DebugDat.DemoSave ? 0 : 1]);
+	sprintf(DifTitle[4], "DebugOut  %s", CHOICE_OFF_ON[DebugDat.MsgDisplay]);
+	sprintf(DifTitle[5], "StgSelect [  %d  ]", DebugDat.StgSelect);
+	sprintf(DifTitle[6], "Hit       %s", CHOICE_OFF_ON[DebugDat.Hit]);
+	sprintf(DifTitle[7], "DemoSave  %s", CHOICE_OFF_ON[DebugDat.DemoSave]);
 #endif
-	return true;
 }
 
-static bool SetGrpItem(void)
+static void SetGrpItem(void)
 {
 	const char	*UorD[3]  = {"上のほう","下のほう","描画せず"};
 	const char	*DMode[4] = {"おまけ","60Fps","30Fps","20Fps"};
@@ -858,38 +864,68 @@ static bool SetGrpItem(void)
 	}
 
 	sprintf(GrpTitle[3],"MsgWindow[%s]", UorD[i]);
-	return true;
 }
 
 static void SetSndItem(void)
 {
-	const char	*EorD[2] = {" 使用する ","使用しない"};
 	static int now;
-	char	*ptr,buf[1000];
-	int		l;
+	char	buf[1000];
 	static BYTE time = 0;
 
-#define SetFlagsMacro(src,flag)		((flag) ? src[0] : src[1])
-	sprintf(SndTitle[0], "WAVE [%s]", SetFlagsMacro(EorD, ConfigDat.SoundFlags.v & SNDF_WAVE_ENABLE));
-	sprintf(SndTitle[1], "MIDI [%s]", SetFlagsMacro(EorD, ConfigDat.SoundFlags.v & SNDF_MIDI_ENABLE));
+	const auto sound_active = (ConfigDat.SoundFlags.v & SNDF_SE_ENABLE);
+	const auto bgm_active = BGM_Enabled();
 
-	if(ConfigDat.SoundFlags.v & SNDF_MIDI_ENABLE) {
+	// Additionally purge the cache at the initialization of the main menu,
+	// and when moving between options.
+	if(
+		(MainWindow.State == CWIN_DEAD) ||
+		(MainWindow.OldKey == KEY_UP) ||
+		(MainWindow.OldKey == KEY_DOWN)
+	) {
+		BGM_PacksAvailable(true);
+	}
+
+	const auto norm_choice = CHOICE_OFF_ON_NARROW[BGM_GainApply()];
+	SndItemSEVol.SetActive(sound_active);
+	SndItemBGMVol.SetActive(bgm_active);
+	SndItemBGMGain.SetActive(bgm_active && BGM_HasGainFactor());
+
+	sprintf(SndTitleSE,      "Sound  [%s]", CHOICE_USE[!sound_active]);
+	sprintf(SndTitleBGM,     "BGM    [%s]", CHOICE_USE[!bgm_active]);
+	sprintf(SndTitleSEVol,   "SoundVolume [ %3d ]", ConfigDat.SEVolume.v);
+	sprintf(SndTitleBGMVol,  "BGMVolume   [ %3d ]", ConfigDat.BGMVolume.v);
+	sprintf(SndTitleBGMGain, "BGMVolNormalize%s", norm_choice);
+	if(!BGM_PacksAvailable()) {
+		sprintf(SndTitleBGMPack, "BGMPack[ Download ]");
+		SndItemBGMPack.Help = BGMPack::HELP_DOWNLOAD;
+	} else if(ConfigDat.BGMPack.v.empty()) {
+		sprintf(SndTitleBGMPack, "BGMPack[%s]", CHOICE_USE[1]);
+		SndItemBGMPack.Help = BGMPack::HELP_SET;
+	} else {
+		sprintf(SndTitleBGMPack, "BGMPack[   ....   ]");
+		SndItemBGMPack.Help = BGMPack::HELP_SET;
+	}
+
+	const auto maybe_dev = MidBackend_DeviceName();
+	if(bgm_active && maybe_dev) {
 		time+=16;
-		ptr = Mid_Dev.name[Mid_Dev.NowID];
-		l = strlen(ptr);
-		if(l>18){
-			sprintf(buf,"     %s     %s",ptr,ptr);
-			if(time==0) now = (now+1)%(l+5);
+		const auto dev = maybe_dev.value();
+		if(dev.size() > 18) {
+			sprintf(buf, "     %s     %s", dev.data(), dev.data());
+			if(time == 0) {
+				now = ((now + 1) % (dev.size() + 5));
+			}
 		}
 		else{
 			now = 0;
-			strcpy(buf,ptr);
+			strcpy(buf, dev.data());
 		}
-		sprintf(SndTitle[2],">%.18s",buf+now);
+		sprintf(SndTitleMIDIPort, ">%.18s", (buf + now));
+		SndItemMIDIPort.State = WINDOW_INFO::STATE::REGULAR;
+	} else {
+		strcpy(SndTitleMIDIPort, ">");
+		SndItemMIDIPort.State = WINDOW_INFO::STATE::DISABLED;
 	}
-	else
-		sprintf(SndTitle[2],"      ^^^^^^^^^^");
-#undef SetFlagsMacro
 }
 
 static void SetInpItem(void)
@@ -906,7 +942,7 @@ static void SetInpItem(void)
 static void SetIKeyItem(void)
 {
 	constexpr LABELS<4> labels = {{ "Shot", "Bomb", "SpeedDown", "ESC" }};
-	auto set = [](char* buf, std::string_view label, INPUT_PAD_BUTTON v) {
+	auto set = [](char* buf, Narrow::string_view label, INPUT_PAD_BUTTON v) {
 		if(v > 0) {
 			sprintf(buf, "%-*s[Button%2d]", labels.w, label.data(), v);
 		} else {

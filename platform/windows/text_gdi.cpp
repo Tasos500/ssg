@@ -3,11 +3,29 @@
  *
  */
 
-#define WIN32_LEAN_AND_MEAN
-
 #include "platform/windows/text_gdi.h"
-#include <assert.h>
-#include <malloc.h>
+#include "platform/windows/utf.h"
+
+PIXEL_SIZE TextGDIExtent(
+	HDC hdc, std::optional<HFONT> font, Narrow::string_view str
+)
+{
+	const auto font_prev = (font ? SelectObject(hdc, font.value()) : nullptr);
+	const auto ret = UTF::WithUTF16<PIXEL_SIZE>(
+		str, [&](const std::wstring_view str_w) {
+			RECT r = { 0, 0, 0, 0 };
+			constexpr UINT flags = (DT_CALCRECT | DT_SINGLELINE);
+			if(!DrawTextW(hdc, str_w.data(), str_w.size(), &r, flags)) {
+				return PIXEL_SIZE{ 0, 0 };
+			}
+			return PIXEL_SIZE{ r.right, r.bottom };
+		}
+	).value_or(PIXEL_SIZE{ 0, 0 });
+	if(font && font_prev) {
+		SelectObject(hdc, font_prev);
+	}
+	return ret;
+}
 
 TEXTRENDER_GDI_SESSION_BASE::TEXTRENDER_GDI_SESSION_BASE(
 	const PIXEL_LTWH& rect, HDC hdc, const std::span<HFONT> fonts
@@ -52,45 +70,28 @@ void TEXTRENDER_GDI_SESSION_BASE::SetColor(const RGBA& color)
 	}
 }
 
+PIXEL_SIZE TEXTRENDER_GDI_SESSION_BASE::Extent(Narrow::string_view str)
+{
+	return TextGDIExtent(hdc, std::nullopt, str);
+}
+
 void TEXTRENDER_GDI_SESSION_BASE::Put(
 	const PIXEL_POINT& topleft_rel,
-	std::string_view str,
+	Narrow::string_view str,
 	std::optional<RGBA> color
 )
 {
-	if(str.size() == 0) {
-		return;
-	}
-
-	auto* str_w = static_cast<wchar_t *>(_malloca(
-		str.size() * sizeof(wchar_t)
-	));
-	if(!str_w) {
-		return;
-	}
-
-	// Try UTF-8
-	auto len_w = MultiByteToWideChar(
-		CP_UTF8, MB_ERR_INVALID_CHARS, str.data(), str.size(), str_w, str.size()
-	);
-	if((len_w == 0) && (GetLastError() == ERROR_NO_UNICODE_TRANSLATION)) {
-		// Fall back on Shift-JIS
-		len_w = MultiByteToWideChar(
-			932, MB_PRECOMPOSED, str.data(), str.size(), str_w, str.size()
-		);
-		assert(len_w > 0);
-	}
-
-	if(color) {
-		SetColor(color.value());
-	}
-	RECT r = {
-		.left = (rect.left + topleft_rel.x),
-		.top = (rect.top + topleft_rel.y),
-		.right = (rect.left + rect.w),
-		.bottom = (rect.top + rect.h),
-	};
-	constexpr UINT flags = (DT_LEFT | DT_TOP | DT_SINGLELINE);
-	DrawTextW(hdc, str_w, len_w, &r, flags);
-	_freea(str_w);
+	UTF::WithUTF16<int>(str, [&](const std::wstring_view str_w) {
+		if(color) {
+			SetColor(color.value());
+		}
+		RECT r = {
+			.left = (rect.left + topleft_rel.x),
+			.top = (rect.top + topleft_rel.y),
+			.right = (rect.left + rect.w),
+			.bottom = (rect.top + rect.h),
+		};
+		constexpr UINT flags = (DT_LEFT | DT_TOP | DT_SINGLELINE);
+		return DrawTextW(hdc, str_w.data(), str_w.size(), &r, flags);
+	});
 }

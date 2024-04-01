@@ -40,13 +40,16 @@ size_t FileLoadInplace(std::span<uint8_t> buf, const PATH_LITERAL s)
 	return LoadInplace(buf, fopen(s, "rb"));
 }
 
-BYTE_BUFFER_OWNED FileLoad(const PATH_LITERAL s, size_t size_limit)
+size_t FileLoadInplace(std::span<uint8_t> buf, const char8_t* s)
 {
-	auto fp = fopen(s, "rb");
-	if(!fp) {
-		return {};
-	}
+	return FileLoadInplace(buf, reinterpret_cast<const PATH_LITERAL>(s));
+}
 
+static BYTE_BUFFER_OWNED FPReadAll(
+	FILE* fp, size_t size_limit = (std::numeric_limits<size_t>::max)()
+)
+{
+	assert(fp);
 	auto size64 = _filelengthi64(fileno(fp));
 	if(size64 > size_limit) {
 		return {};
@@ -57,17 +60,36 @@ BYTE_BUFFER_OWNED FileLoad(const PATH_LITERAL s, size_t size_limit)
 	if(!buf) {
 		return {};
 	}
-
-	if(LoadInplace({ buf.get(), size }, std::move(fp)) != size) {
+	if(fread(buf.get(), 1, size, fp) != size) {
 		return {};
 	}
+	return buf;
+}
 
-	return std::move(buf);
+BYTE_BUFFER_OWNED FileLoad(const PATH_LITERAL s, size_t size_limit)
+{
+	auto fp = fopen(s, "rb");
+	if(!fp) {
+		return {};
+	}
+	auto ret = FPReadAll(fp, size_limit);
+	fclose(fp);
+	return ret;
+}
+
+BYTE_BUFFER_OWNED FileLoad(const char8_t* s, size_t size_limit)
+{
+	return FileLoad(reinterpret_cast<const PATH_LITERAL>(s), size_limit);
 }
 
 bool FileWrite(const PATH_LITERAL s, std::span<const BYTE_BUFFER_BORROWED> bufs)
 {
 	return WriteAndClose(fopen(s, "wb"), bufs);
+}
+
+bool FileWrite(const char8_t* s, std::span<const BYTE_BUFFER_BORROWED> bufs)
+{
+	return FileWrite(reinterpret_cast<const PATH_LITERAL>(s), bufs);
 }
 
 bool FileAppend(
@@ -82,10 +104,15 @@ bool FileAppend(
 	);
 }
 
+bool FileAppend(const char8_t* s, std::span<const BYTE_BUFFER_BORROWED> bufs)
+{
+	return FileAppend(reinterpret_cast<const PATH_LITERAL>(s), bufs);
+}
+
 // Streams
 // -------
 
-struct FILE_STREAM_C : public FILE_STREAM_WRITE {
+struct FILE_STREAM_C : public FILE_STREAM_READ, FILE_STREAM_WRITE {
 	FILE* fp;
 
 public:
@@ -116,10 +143,35 @@ public:
 		return ret;
 	};
 
+	size_t Read(std::span<uint8_t> buf) override {
+		return fread(buf.data(), 1, buf.size_bytes(), fp);
+	}
+
+	BYTE_BUFFER_OWNED ReadAll() override {
+		if(fseek(fp, 0, SEEK_SET)) {
+			return {};
+		}
+		return FPReadAll(fp);
+	}
+
 	bool Write(BYTE_BUFFER_BORROWED buf) override {
 		return (fwrite(buf.data(), buf.size(), 1, fp) == 1);
 	};
 };
+
+std::unique_ptr<FILE_STREAM_READ> FileStreamRead(const PATH_LITERAL s)
+{
+	auto* fp = fopen(s, "rb");
+	if(!fp) {
+		return nullptr;
+	}
+	return std::unique_ptr<FILE_STREAM_C>(new (std::nothrow) FILE_STREAM_C(fp));
+}
+
+std::unique_ptr<FILE_STREAM_READ> FileStreamRead(const char8_t* s)
+{
+	return FileStreamRead(reinterpret_cast<const PATH_LITERAL>(s));
+}
 
 std::unique_ptr<FILE_STREAM_WRITE> FileStreamWrite(
 	const PATH_LITERAL s, bool fail_if_exists
@@ -130,5 +182,14 @@ std::unique_ptr<FILE_STREAM_WRITE> FileStreamWrite(
 		return nullptr;
 	}
 	return std::unique_ptr<FILE_STREAM_C>(new (std::nothrow) FILE_STREAM_C(fp));
+}
+
+std::unique_ptr<FILE_STREAM_WRITE> FileStreamWrite(
+	const char8_t* s, bool fail_if_exists
+)
+{
+	return FileStreamWrite(
+		reinterpret_cast<const PATH_LITERAL>(s), fail_if_exists
+	);
 }
 // -------

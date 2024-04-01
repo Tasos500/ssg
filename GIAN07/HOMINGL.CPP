@@ -6,7 +6,7 @@
 #include "HOMINGL.H"
 #include "GIAN.H"
 #include "MAID.H"
-#include "platform/snd.h"
+#include "game/snd.h"
 #include "game/ut_math.h"
 
 #define HOMINGL_WIDTH	(8*64)
@@ -126,7 +126,7 @@ void HLaserMove(void)
 
 				if(abs(deg2)<8){
 					hl->Type = HL_NONE;
-					SndPlay(17, hl->p[hl->Current].x);
+					Snd_SEPlay(17, hl->p[hl->Current].x);
 				}
 				else{
 					if(hl->v > 2*64)

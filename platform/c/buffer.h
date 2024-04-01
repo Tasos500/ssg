@@ -8,34 +8,13 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <string_view>
-#include <type_traits>
 #include <vector>
-
-// We really do not want to accidentally call reinterpret_cast<uint8_t *>() on
-// a raw reference to something like an STL type. (Too bad that this doesn't
-// catch std::span.)
-template <typename T> concept SERIALIZABLE = (
-	!std::is_pointer_v<T> && std::is_trivially_copyable_v<T>
-);
 
 struct BYTE_BUFFER_BORROWED : public std::span<const uint8_t> {
 	using span::span;
 
-	template <SERIALIZABLE T> BYTE_BUFFER_BORROWED(const T& val) :
-		span(reinterpret_cast<const uint8_t *>(&val), sizeof(val)) {
-	}
-
 	template <typename T, size_t N> BYTE_BUFFER_BORROWED(std::span<T, N> val) :
 		span(reinterpret_cast<const uint8_t *>(val.data()), val.size_bytes()) {
-	}
-
-	template <SERIALIZABLE T> BYTE_BUFFER_BORROWED(const std::vector<T>& val) :
-		BYTE_BUFFER_BORROWED(std::span<const T>{ val.data(), val.size() }) {
-	}
-
-	BYTE_BUFFER_BORROWED(const std::string_view str) noexcept :
-		span({ reinterpret_cast<const uint8_t *>(str.data()), str.length() }) {
 	}
 };
 
@@ -50,6 +29,11 @@ template <
 
 	size_t cursor = 0;
 
+	// Required to work around a C26495 false positive, for some reason?
+	BYTE_BUFFER_CURSOR(const std::span<ConstOrNonConstByte> other) :
+		std::span<ConstOrNonConstByte>(other) {
+	}
+
 	// Reads up to [n] contiguous values of type T from the active cursor
 	// position if possible. If the function returns a valid span, all [n]
 	// objects are safe to access.
@@ -60,6 +44,7 @@ template <
 		if((cursor_new > this->size()) || (cursor_new < cursor)) {
 			return std::nullopt;
 		}
+		[[gsl::suppress(type.1)]]
 		auto ret = std::span<transfer_const<T>>{
 			reinterpret_cast<transfer_const<T> *>(this->data() + cursor), n
 		};

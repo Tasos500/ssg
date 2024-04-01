@@ -8,7 +8,7 @@
 #include "GIAN.H"
 #include "LEVEL.H"
 #include "GIAN07/entity.h"
-#include "platform/snd.h"
+#include "game/snd.h"
 
 /*
  * ECLコマンドのアドレス更新には ECL_CmdLen[ECLコマンド定数] を使用する
@@ -207,7 +207,7 @@ extern void enemy_clear(void)
 			e->hp    = 0;
 			e->count = 0;
 			if(e->LLaserRef) LLaserForceClose(e);	// レーザーの強制クローズ
-			SndPlay(SOUND_ID_BOMB, e->x);
+			Snd_SEPlay(SOUND_ID_BOMB, e->x);
 		}
 		else{
 			// 描画しないタイプの敵の消去の仕方は他の場合と異なり、 //
@@ -248,7 +248,7 @@ bool enemy_damage(int x,int y,int damage)
 			else{
 				e->IsDamaged = ((e->count) & 1);
 				if(e->hp<=damage){
-					SndPlay(SOUND_ID_BOMB, e->x);
+					Snd_SEPlay(SOUND_ID_BOMB, e->x);
 					if(e->LLaserRef) LLaserForceClose(e);	// レーザーの強制クローズ
 					PowerUp((BYTE)e->hp);			// パワーアップ
 					e->hp    = 0;
@@ -258,7 +258,7 @@ bool enemy_damage(int x,int y,int damage)
 					if(e->item) ItemSet(e->x,e->y,e->item);
 				}
 				else{
-					SndPlay(SOUND_ID_HIT, e->x);
+					Snd_SEPlay(SOUND_ID_HIT, e->x);
 					PowerUp(damage);	// ここでもパワーアップ
 					e->hp -= damage;
 				}
@@ -285,7 +285,7 @@ bool enemy_damage2(int x,int y,int damage)
 			else{
 				e->IsDamaged = ((e->count) & 1);
 				if(e->hp<=damage){
-					SndPlay(SOUND_ID_BOMB, e->x);
+					Snd_SEPlay(SOUND_ID_BOMB, e->x);
 					if(e->LLaserRef) LLaserForceClose(e);	// レーザーの強制クローズ
 					PowerUp((BYTE)e->hp);			// パワーアップ
 					e->hp    = 0;
@@ -295,7 +295,7 @@ bool enemy_damage2(int x,int y,int damage)
 					if(e->item) ItemSet(e->x,e->y,e->item);
 				}
 				else{
-					SndPlay(SOUND_ID_HIT, e->x);
+					Snd_SEPlay(SOUND_ID_HIT, e->x);
 					PowerUp(damage);	// ここでもパワーアップ
 					e->hp -= damage;
 				}
@@ -324,7 +324,7 @@ extern VOID enemy_damage3(int x,int y,BYTE d)
 			else{
 				e->IsDamaged = ((e->count) & 1);
 				if(e->hp<=damage){
-					SndPlay(SOUND_ID_BOMB, e->x);
+					Snd_SEPlay(SOUND_ID_BOMB, e->x);
 					if(e->LLaserRef) LLaserForceClose(e);	// レーザーの強制クローズ
 					PowerUp((BYTE)e->hp);			// パワーアップ
 					e->hp    = 0;
@@ -334,7 +334,7 @@ extern VOID enemy_damage3(int x,int y,BYTE d)
 					if(e->item) ItemSet(e->x,e->y,e->item);
 				}
 				else{
-					SndPlay(SOUND_ID_HIT, e->x);
+					Snd_SEPlay(SOUND_ID_HIT, e->x);
 					PowerUp(damage);	// ここでもパワーアップ
 					e->hp -= damage;
 				}
@@ -358,7 +358,7 @@ extern void enemy_damage4(int damage)
 			else{
 				e->IsDamaged = ((e->count) & 1);
 				if(e->hp<=damage){
-					SndPlay(SOUND_ID_BOMB, e->x);
+					Snd_SEPlay(SOUND_ID_BOMB, e->x);
 					if(e->LLaserRef) LLaserForceClose(e);	// レーザーの強制クローズ
 					PowerUp((BYTE)e->hp);			// パワーアップ
 					e->hp    = 0;
@@ -368,7 +368,7 @@ extern void enemy_damage4(int damage)
 					if(e->item) ItemSet(e->x,e->y,e->item);
 				}
 				else{
-					SndPlay(SOUND_ID_HIT, e->x);
+					Snd_SEPlay(SOUND_ID_HIT, e->x);
 					PowerUp(damage);	// ここでもパワーアップ
 					e->hp -= damage;
 				}
@@ -1601,7 +1601,7 @@ void parse_ECL(ENEMY_DATA *e)
 
 		case(ECL_PSE):			// 効果音を鳴らす
 			ECL_DEBUG("ECL_PSE",0);
-			SndPlay(cmd[1], e->x);
+			Snd_SEPlay(cmd[1], e->x);
 			bRetFlag = FALSE;
 		break;
 
@@ -1688,7 +1688,7 @@ void parse_ECL(ENEMY_DATA *e)
 				case(ECLCST_TCMD_REP):
 					//char buf[100];
 					//sprintf(buf,"REP=%d [REG:%d]",dwTemp,cmd[2]);
-					//DebugOut(buf);
+					// DebugOut(buf);
 					e->t_cmd.rep= (BYTE)dwTemp;
 				break;	// 弾コマンド(繰り返し)
 
@@ -1699,7 +1699,7 @@ void parse_ECL(ENEMY_DATA *e)
 				case(ECLCST_ENEMY_D):	e->d = (BYTE)dwTemp;	break;		// 敵の角度
 
 				default:
-					DebugOut("ナゾのレジスタ指定++");
+					DebugOut(u8"ナゾのレジスタ指定++");
 				break;
 			}
 			bRetFlag = FALSE;
@@ -1713,7 +1713,7 @@ void parse_ECL(ENEMY_DATA *e)
 				break;
 
 				default:	// レジスタ指定がおかしい
-					DebugOut("ナゾのレジスタ指定");
+					DebugOut(u8"ナゾのレジスタ指定");
 				break;
 			}
 			bRetFlag = FALSE;
@@ -1727,7 +1727,7 @@ void parse_ECL(ENEMY_DATA *e)
 				break;
 
 				default:	// レジスタ指定がおかしい
-					DebugOut("ナゾのレジスタ指定");
+					DebugOut(u8"ナゾのレジスタ指定");
 				break;
 			}
 			bRetFlag = FALSE;
@@ -1741,7 +1741,7 @@ void parse_ECL(ENEMY_DATA *e)
 				break;
 
 				default:	// レジスタ指定がおかしい
-					DebugOut("ナゾのレジスタ指定");
+					DebugOut(u8"ナゾのレジスタ指定");
 				break;
 			}
 			bRetFlag = FALSE;
@@ -1755,7 +1755,7 @@ void parse_ECL(ENEMY_DATA *e)
 				break;
 
 				default:	// レジスタ指定がおかしいに
-					DebugOut("ナゾのレジスタ指定");
+					DebugOut(u8"ナゾのレジスタ指定");
 				break;
 			}
 			bRetFlag = FALSE;
@@ -1769,7 +1769,7 @@ void parse_ECL(ENEMY_DATA *e)
 				break;
 
 				default:	// レジスタ指定がおかしいに
-					DebugOut("ナゾのレジスタ指定");
+					DebugOut(u8"ナゾのレジスタ指定");
 				break;
 			}
 			bRetFlag = FALSE;
@@ -1802,7 +1802,7 @@ void parse_ECL(ENEMY_DATA *e)
 					break;
 
 				default:	// レジスタ指定がおかしい
-					DebugOut("ナゾのレジスタ指定");
+					DebugOut(u8"ナゾのレジスタ指定");
 				break;
 			}
 			bRetFlag = FALSE;
@@ -1816,7 +1816,7 @@ void parse_ECL(ENEMY_DATA *e)
 				break;
 
 				default:	// レジスタ指定がおかしい
-					DebugOut("ナゾのレジスタ指定");
+					DebugOut(u8"ナゾのレジスタ指定");
 				break;
 			}
 			bRetFlag = FALSE;
@@ -1901,13 +1901,13 @@ extern void CheckECLInterrupt(ENEMY_DATA *e)
 			case(ECLVECT_HP):	// HPL 割り込み
 				//char buf[100];
 				//sprintf(buf,"hp = %d",e->hp);
-				//DebugOut(buf);
+				// DebugOut(buf);
 				if(e->hp <= e->Vect[ECLVECT_HP].value){
 					e->cmd = e->Vect[ECLVECT_HP].vect;
 					e->cmd_c = 0;		// コマンド繰り返しカウンタ
 					e->rep_c = 0;		// LOOP(旧REP)命令カウンタ
 					e->t_rep = 0;		// 自動弾発射タイミング(0:自動発射せず)
-					//DebugOut("受理");
+					// DebugOut(u8"受理");
 					return;
 				}
 			break;

@@ -7,6 +7,7 @@
 #define PBGWIN_LOADER_H		"LOADER : Version 0.10 : Update 2000/02/18"
 //#pragma message(PBGWIN_LOADER_H)
 
+#include "game/hash.h"
 #include "DirectXUTYs/DD_UTY.H"
 
 
@@ -84,12 +85,16 @@ typedef struct tagENDING_GRP{
 
 
 ///// [ 関数 ] /////
-extern BOOL LoadStageData(BYTE stage);				// ＥＣＬ&ＳＣＬデータ列をメモリ上にロードする
-extern BOOL LoadGraph(int stage);					// あるステージのグラフィックをロードする
+void LoaderInit(void);
+bool LoadStageData(uint8_t stage);	// ＥＣＬ&ＳＣＬデータ列をメモリ上にロードする
+bool LoadGraph(int stage);	// あるステージのグラフィックをロードする
 bool LoadFace(uint8_t FaceID, uint8_t FileNo);	// 顔グラフィックをロードする
-extern BOOL LoadMusic(int no);						// ｎ番目の曲をロードする
-extern BOOL LoadSound(void);						// 全ての Sound データをロードする
-extern BOOL LoadMusicRoomComment(int no);			// MusicRoom のコメントをロードする
+bool LoadMusic(unsigned int id);	// ｎ番目の曲をロードする
+bool LoadMusicByHash(const HASH& hash);
+bool LoadMIDIBuffer(BYTE_BUFFER_OWNED);
+bool LoadSound(void);	// 全ての Sound データをロードする
+bool LoadMusicRoomComment(int no);	// MusicRoom のコメントをロードする
+BYTE_BUFFER_OWNED LoadDemo(int stage);
 
 extern void LoadPaletteFrom(SURFACE_DDRAW& surf);
 extern void LoadPaletteFromEnemy(void);		// 敵のパレットにする
@@ -155,7 +160,7 @@ extern const std::reference_wrapper<SURFACE_DDRAW> GrEndingPic[ENDING_PIC_MAX];
 
 extern FACE_DATA	FaceData[FACE_MAX];	// 顔グラ用
 
-extern DWORD		MusicNum;			// 曲数
+extern uint32_t	MusicNum;	// 曲数
 
 extern PALETTE SProjectPalette;
 

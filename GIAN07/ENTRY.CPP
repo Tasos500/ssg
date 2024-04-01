@@ -8,11 +8,13 @@
 #include "GIAN07/GAMEMAIN.H"
 #include "GIAN07/LOADER.H"
 #include "DirectXUTYs/DD_UTY.H"
-#include "DirectXUTYs/PBGMIDI.H"
 #include "platform/input.h"
-#include "platform/snd.h"
+#include "platform/path.h"
+#include "game/bgm.h"
 #include "game/coords.h"
 #include "game/screenshot.h"
+#include "game/snd.h"
+#include <filesystem>
 
 // Mapping world coordinates to a position in the stereo field
 // -----------------------------------------------------------
@@ -33,8 +35,26 @@ const int SND_X_MID = PixelToWorld(320);
 const int SND_X_PER_DECIBEL = PixelToWorld(25);
 // -----------------------------------------------------------
 
+// Volume controls
+// ---------------
+
+const VOLUME& Mid_Volume = ConfigDat.BGMVolume.v;
+const VOLUME& Snd_VolumeBGM = ConfigDat.BGMVolume.v;
+const VOLUME& Snd_VolumeSE = ConfigDat.SEVolume.v;
+// ---------------
+
+// MUSIC.DAT loaders
+// -----------------
+
+bool (*const BGM_MidLoadOriginal)(unsigned int id) = LoadMusic;
+bool (*const BGM_MidLoadBuffer)(BYTE_BUFFER_OWNED) = LoadMIDIBuffer;
+bool (*const BGM_MidLoadByHash)(const HASH& hash) = LoadMusicByHash;
+// -----------------
+
 bool XInit(void)
 {
+	std::filesystem::current_path(PathForData());
+
 	DebugSetup();
 
 	// コンフィグをロードする //
@@ -53,33 +73,16 @@ bool XInit(void)
 		return false;
 	}
 
-	// サウンドの初期化 //
-	if(ConfigDat.SoundFlags.v & SNDF_WAVE_ENABLE) {
-		// 何らかの理由で使用できなければ、Disable とする //
-		if(!SndInit()) {
-			ConfigDat.SoundFlags.v &= (~SNDF_WAVE_ENABLE);
-		} else if(!LoadSound()) {
-			ConfigDat.SoundFlags.v &= (~SNDF_WAVE_ENABLE);
-			SndCleanup();
-		}
+	// ＢＧＭの初期化 //
+	if(ConfigDat.SoundFlags.v & SNDF_BGM_ENABLE) {
+		BGM_Init();
 	}
-
-	// ＭＩＤＩの初期化 //
-	// MIDFN_MIDLOOP を使用すべきか //
-	if(ConfigDat.SoundFlags.v & SNDF_MIDI_ENABLE) {
-		if(!Mid_Start(MIDFN_CALLBACK, MIDPL_NORM)) {
-			ConfigDat.SoundFlags.v &= (~SNDF_MIDI_ENABLE);
-		}
+	if(!BGM_PackSet(ConfigDat.BGMPack.v)) {
+		ConfigDat.BGMPack.v.clear();
 	}
-
-	// Call a different *Init() function here to quickly test a different //
-	// game state. //
-	if(!SProjectInit()) {
-		return false;
-	}
-
-	ScreenshotSetPrefix(_PATH("秋霜"));
-
+	BGM_SetGainApply(!(ConfigDat.SoundFlags.v & SNDF_BGM_NOT_VOL_NORM));
+	ScreenshotSetPrefix(u8"秋霜");
+	LoaderInit();
 	return true;
 }
 
@@ -87,9 +90,8 @@ void XCleanup(void)
 {
 	ConfigSave();
 	DxObj.Cleanup();
-	SndCleanup();
-	Mid_Stop();
-	Mid_End();
+	BGM_Cleanup();
+	Snd_Cleanup();
 	Key_End();
 }
 

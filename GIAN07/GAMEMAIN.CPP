@@ -11,14 +11,15 @@
 #include "LEVEL.H"
 #include "MUSIC.H"
 #include "SCORE.H"
-#include "DirectXUTYs/PBGMIDI.H"
-#include "platform/snd.h"
+#include "game/bgm.h"
 #include "game/input.h"
+#include "game/midi.h"
+#include "game/snd.h"
+#include <mmsystem.h>
 
 
 DWORD		DrawCount = 0;
 DWORD		MidiPlayID = 0;
-char		MidiTempo  = 0;
 DWORD		DemoTimer  = 0;
 BYTE		WeaponKeyWait = 0;
 int	GameOverTimer = 0;
@@ -86,7 +87,7 @@ extern bool ScoreNameInit(void)
 	GrpFlip();
 
 	if(!LoadGraph(GRAPH_ID_NAMEREGIST)){
-		DebugOut("GRAPH.DAT が破壊されています");
+		DebugOut(u8"GRAPH.DAT が破壊されています");
 		return FALSE;
 	}
 
@@ -108,20 +109,20 @@ void ScoreNameProc(bool&)
 			if(InputLocked) {
 				break;
 			}
-			SndPlay(SOUND_ID_CANCEL);
+			Snd_SEPlay(SOUND_ID_CANCEL);
 			GameExit(FALSE);
 		return;
 
 		case(KEY_UP):case(KEY_LEFT):
 			if(ScoreString[4].bMoveEnable) break;
-			SndPlay(SOUND_ID_SELECT);
+			Snd_SEPlay(SOUND_ID_SELECT);
 			CurrentDif  = (CurrentDif+4)%5;
 			CurrentRank = (BYTE)SetScoreString(NULL, CurrentDif);
 		break;
 
 		case(KEY_DOWN):		case(KEY_RIGHT):
 			if(ScoreString[4].bMoveEnable) break;
-			SndPlay(SOUND_ID_SELECT);
+			Snd_SEPlay(SOUND_ID_SELECT);
 			CurrentDif  = (CurrentDif+1)%5;
 			CurrentRank = (BYTE)SetScoreString(NULL, CurrentDif);
 		break;
@@ -258,35 +259,35 @@ void NameRegistProc(bool&)
 		switch(Key_Data){
 			case(KEY_UP):
 				y = (y+2)%3;
-				SndPlay(SOUND_ID_SELECT);
+				Snd_SEPlay(SOUND_ID_SELECT);
 			break;
 
 			case(KEY_DOWN):
 				y = (y+1)%3;
-				SndPlay(SOUND_ID_SELECT);
+				Snd_SEPlay(SOUND_ID_SELECT);
 			break;
 
 			case(KEY_LEFT):
 				if(y==2 && x>20)	x = (x-2)%26;
 				else				x = (x+25)%26;
-				SndPlay(SOUND_ID_SELECT);
+				Snd_SEPlay(SOUND_ID_SELECT);
 			break;
 
 			case(KEY_RIGHT):
 				if(y==2 && x>=20)	x = (x+2)%26;
 				else				x = (x+1)%26;
-				SndPlay(SOUND_ID_SELECT);
+				Snd_SEPlay(SOUND_ID_SELECT);
 			break;
 
 			case(KEY_BOMB):
-				SndPlay(SOUND_ID_CANCEL);
+				Snd_SEPlay(SOUND_ID_CANCEL);
 			goto BACK_NR_PROC;
 
 			case(KEY_TAMA):case(KEY_RETURN):
 				if(InputLocked) {
 					break;
 				}
-				SndPlay(SOUND_ID_SELECT);
+				Snd_SEPlay(SOUND_ID_SELECT);
 
 				// 最後の文字まで来ていた場合 //
 				if(strlen(ScoreString[CurrentRank-1].Name)==NR_NAME_LEN-1){
@@ -426,8 +427,8 @@ bool NameRegistInit(bool bNeedChgMusic)
 	else                              CurrentName.Stage = GameStage;
 
 	// デバッグ用... //
-	SndStop(8);			// ワーニング音を止める
-	SndStopAll();
+	Snd_SEStop(8);	// ワーニング音を止める
+	Snd_SEStopAll();
 
 	// ハイスコアで無いならばタイトルに移行する //
 	CurrentRank = (BYTE)SetScoreString(&CurrentName, CurrentLevel());
@@ -438,7 +439,7 @@ bool NameRegistInit(bool bNeedChgMusic)
 	GrpFlip();
 
 	if(!LoadGraph(GRAPH_ID_NAMEREGIST)){
-		DebugOut("GRAPH.DAT が破壊されています");
+		DebugOut(u8"GRAPH.DAT が破壊されています");
 		return FALSE;
 	}
 
@@ -448,9 +449,7 @@ bool NameRegistInit(bool bNeedChgMusic)
 	GameMain = NameRegistProc;
 
 	if(bNeedChgMusic){
-		Mid_Stop();
-		LoadMusic(19);
-		Mid_Play();
+		BGM_Switch(19);
 	}
 
 	return TRUE;
@@ -486,7 +485,7 @@ void GameSTD_Init(void)
 	WarningEffectInit();
 	//WarningEffectSet();
 
-	Mid_Tempo(0);
+	BGM_SetTempo(0);
 
 	//DrawCount = 0;
 }
@@ -525,17 +524,18 @@ bool GameInit(void(*NextProc)(bool& quit))
 {
 	TextObj.Clear();
 	if(NextProc != DemoProc) {
-		Mid_FadeOut(240);
+		BGM_FadeOut(240);
 		MTitleInit();
 	}
 	if(NextProc == GameProc) {
 		// ウィンドウの表示位置を設定する //
 		// Replays don't show dialog, so this is the only place where we need
 		// to do this.
+		const auto flags = MSG_WINDOW_FLAGS::WITH_FACE;
 		if(ConfigDat.GraphFlags.v & GRPF_WINDOW_UPPER) {
-			MWinInit({ 128,  16, (640 - 128),  96 });
+			MWinInit({ 128,  16, (640 - 128),  96 }, flags);
 		} else if(!(ConfigDat.GraphFlags.v & GRPF_MSG_DISABLE)) {
-			MWinInit({ 128, 400, (640 - 128), 480 });
+			MWinInit({ 128, 400, (640 - 128), 480 }, flags);
 		}
 
 		// These windows can also only show up outside of replays.
@@ -565,11 +565,11 @@ extern bool GameNextStage(void)
 	MaidNextStage();
 
 	if(!LoadGraph(GameStage)){
-		DebugOut("GRAPH.DAT が破壊されています");
+		DebugOut(u8"GRAPH.DAT が破壊されています");
 		return FALSE;
 	}
 	if(!LoadStageData(GameStage)){
-		DebugOut("ENEMY.DAT が破壊されています");
+		DebugOut(u8"ENEMY.DAT が破壊されています");
 		return FALSE;
 	}
 
@@ -586,7 +586,7 @@ extern bool GameReplayInit(int Stage)
 	GameStage = Stage;
 
 	if(!DemoplayLoadReplay(GameStage)) {
-		//DebugOut("デモプレイデータが存在せず");
+		// DebugOut(u8"デモプレイデータが存在せず");
 		return FALSE;
 	}
 
@@ -597,12 +597,12 @@ extern bool GameReplayInit(int Stage)
 	GameSTD_Init();
 
 	if(!LoadGraph(GameStage)){
-		DebugOut("GRAPH.DAT が破壊されています");
+		DebugOut(u8"GRAPH.DAT が破壊されています");
 		DemoplayCleanup();
 		return FALSE;
 	}
 	if(!LoadStageData(GameStage)){
-		DebugOut("ENEMY.DAT が破壊されています");
+		DebugOut(u8"ENEMY.DAT が破壊されています");
 		DemoplayCleanup();
 		return FALSE;
 	}
@@ -678,18 +678,18 @@ bool DemoInit(void)
 //	GameStage = 1;					// こっちはＨＰ体験版用         //
 
 	if(!DemoplayLoadDemo(GameStage)) {
-		//DebugOut("デモプレイデータが存在せず");
+		// DebugOut(u8"デモプレイデータが存在せず");
 		return FALSE;
 	}
 
 	PlayRankReset();
 
 	if(!LoadGraph(GameStage)){
-		DebugOut("GRAPH.DAT が破壊されています");
+		DebugOut(u8"GRAPH.DAT が破壊されています");
 		return FALSE;
 	}
 	if(!LoadStageData(GameStage)){
-		DebugOut("ENEMY.DAT が破壊されています");
+		DebugOut(u8"ENEMY.DAT が破壊されています");
 		return FALSE;
 	}
 
@@ -767,7 +767,7 @@ void SProjectProc(bool&)
 bool SProjectInit(void)
 {
 	if(!LoadGraph(GRAPH_ID_SPROJECT)){
-		DebugOut("GRAPH.DAT が破壊されています");
+		DebugOut(u8"GRAPH.DAT が破壊されています");
 		return FALSE;
 	}
 
@@ -794,34 +794,35 @@ extern bool MusicRoomInit(void)
 	GrpFlip();
 
 	if(!LoadGraph(GRAPH_ID_MUSICROOM)){
-		DebugOut("GRAPH.DAT が破壊されています");
+		DebugOut(u8"GRAPH.DAT が破壊されています");
 		return FALSE;
 	}
 
 	GrpSetClip(0,0,640,480);
 
 	MidiPlayID = 0;
-	MidiTempo = 0;
 
-	Mid_Tempo(0);
+	BGM_SetTempo(0);
 
+	// Still necessary because the note arrays aren't actually processed
+	// outside of the Music Room.
 	Mid_TableInit();
 /*
-	Mid_Stop();
+	BGM_Stop();
 */
 	if(!LoadMusicRoomComment(0)){
-		DebugOut("ENEMY.DAT がはかいされています");
+		DebugOut(u8"ENEMY.DAT がはかいされています");
 		GameExit();
 		return FALSE;
 	}
 /*
 	if(!LoadMusic(0)){
-		DebugOut("MUSIC.DAT が破壊されています");
+		DebugOut(u8"MUSIC.DAT が破壊されています");
 		GameExit();
 		return FALSE;
 	}
 */
-//	Mid_Play();
+//	BGM_Play();
 
 	GameMain = MusicRoomProc;
 
@@ -846,24 +847,19 @@ extern bool GameExit(bool bNeedChgMusic)
 	}
 
 	if(!LoadGraph(GRAPH_ID_TITLE)){
-		DebugOut("GRAPH.DAT が破壊されています");
+		DebugOut(u8"GRAPH.DAT が破壊されています");
 		return FALSE;
 	}
 	GrpSetClip(0,0,640,480);
 
 	LLaserSetup();		// 音を止める
-	SndStop(8);			// ワーニング音を止めるのだ
+	Snd_SEStop(8);	// ワーニング音を止めるのだ
 
-	//LoadFace(0,0);
+	const auto flags = MSG_WINDOW_FLAGS::CENTER;
 	MWinForceClose();
-	MWinInit({ (128 + 8), (400 + 16 + 20), (640 - 128 - 8), 480 });
+	MWinInit({ (128 + 8), (400 + 16 + 20), (640 - 128 - 8), 480 }, flags);
 	MWinOpen();
 	//MWinFace(0);
-
-	InitMainWindow();
-	MainWindow.Open({ 400, 250 }, 0);
-	// MainWindow.Open({ 150, 200 }, 0);
-	// MainWindow.Open({ 250, 150 }, 0);
 
 	DemoTimer = 0;
 
@@ -871,11 +867,16 @@ extern bool GameExit(bool bNeedChgMusic)
 
 	if(GameMain != DemoProc){
 		if(bNeedChgMusic){
-			Mid_Stop();
-			LoadMusic(0);
-			Mid_Play();
+			BGM_Switch(0);
 		}
 	}
+
+	// Must come after the BGM switch to correctly initialize the sound
+	// configuration menu.
+	InitMainWindow();
+	MainWindow.Open({ 400, 250 }, 0);
+	// MainWindow.Open({ 150, 200 }, 0);
+	// MainWindow.Open({ 250, 150 }, 0);
 
 	GameMain  = TitleProc;
 
@@ -1090,7 +1091,7 @@ void WeaponSelectProc(bool&)
 		else      Viv.weapon = (Viv.weapon+1)%3;
 		spd = 0;
 		deg = 0;
-		SndPlay(SOUND_ID_BUZZ);
+		Snd_SEPlay(SOUND_ID_BUZZ);
 	}
 
 	if(WeaponKeyWait){
@@ -1132,7 +1133,7 @@ void WeaponSelectProc(bool&)
 			MaidTamaIndSet();
 			count = 0;
 
-			SndPlay(SOUND_ID_SELECT);
+			Snd_SEPlay(SOUND_ID_SELECT);
 			if(GameStage != GRAPH_ID_EXSTAGE){
 			#ifdef PBG_DEBUG
 				GameStage = DebugDat.StgSelect;
@@ -1162,11 +1163,11 @@ void WeaponSelectProc(bool&)
 			}
 
 			if(!LoadGraph(GameStage)){
-				DebugOut("GRAPH.DAT が破壊されています");
+				DebugOut(u8"GRAPH.DAT が破壊されています");
 				return;
 			}
 			if(!LoadStageData(GameStage)){
-				DebugOut("ENEMY.DAT が破壊されています");
+				DebugOut(u8"ENEMY.DAT が破壊されています");
 				return;
 			}
 
@@ -1175,7 +1176,7 @@ void WeaponSelectProc(bool&)
 
 		case(KEY_ESC):case(KEY_BOMB):
 			if(spd) break;
-			SndPlay(SOUND_ID_CANCEL);
+			Snd_SEPlay(SOUND_ID_CANCEL);
 			GameExit(FALSE);
 		return;
 	}
@@ -1302,6 +1303,9 @@ void TitleProc(bool& quit)
 		quit = true;
 	}
 */
+	// Running this here to prevent MIDI processing from jumping over a large
+	// number of events once the player enters the Music Room.
+	BGM_UpdateMIDITables();
 
 	if(Key_Data==0) DemoTimer += 1;
 	else            DemoTimer  = 0;
@@ -1312,8 +1316,12 @@ void TitleProc(bool& quit)
 		return;
 	}
 
-	CWinMove(&MainWindow);
-	MWinHelp(&MainWindow);
+	auto* window_active = ((BGMPackWindow.State != CWIN_DEAD)
+		? &BGMPackWindow
+		: &MainWindow
+	);
+	CWinMove(window_active);
+	MWinHelp(window_active);
 	MWinMove();
 	if(GameMain!=TitleProc) return;
 
@@ -1334,7 +1342,7 @@ void TitleProc(bool& quit)
 		GrpBlt(&src, 0, 42, GrTitle);
 		// GrpBlt(&src, (320 - 175), 77, GrTitle);
 		MWinDraw();
-		CWinDraw(&MainWindow);
+		CWinDraw(window_active);
 		#ifdef PBG_DEBUG
 			OutputDebugMsg();
 		#endif
@@ -1365,12 +1373,12 @@ void PauseProc(bool&)
 // 音楽室 //
 void MusicRoomProc(bool&)
 {
-	PIXEL_LTRB	src;
 	char	buf[100];
-	int		m,s;
 	int		i;
 	static WORD Old_Key;
 	static BYTE DevChgWait;
+
+	const auto playing = BGM_Playing();
 
 	if(Key_Data!=Old_Key){
 		switch(Key_Data){
@@ -1382,12 +1390,10 @@ void MusicRoomProc(bool&)
 			case(KEY_RIGHT):
 				MidiPlayID+=2;
 			case(KEY_LEFT):
-				Mid_Stop();
-				Mid_TableInit();
+				BGM_Stop();
 				MidiPlayID = (MidiPlayID+MusicNum-1)%MusicNum;
-				LoadMusic(MidiPlayID);
+				BGM_Switch(MidiPlayID);
 				LoadMusicRoomComment(MidiPlayID);
-				Mid_Play();
 			break;
 		}
 
@@ -1396,31 +1402,29 @@ void MusicRoomProc(bool&)
 
 	switch(Key_Data){
 		case(KEY_UP):
-			if(MidiTempo<100) MidiTempo++;
-			Mid_Tempo(MidiTempo);
+			BGM_SetTempo(BGM_GetTempo() + 1);
 		break;
 		case(KEY_DOWN):
-			if(MidiTempo>-100) MidiTempo--;
-			Mid_Tempo(MidiTempo);
+			BGM_SetTempo(BGM_GetTempo() - 1);
 		break;
 
 		case(KEY_SHIFT):
-			MidiTempo = 0;
-			Mid_Tempo(0);
+			BGM_SetTempo(0);
 		break;
 	}
 
 	if(SystemKey_Data & SYSKEY_BGM_FADE) {
-		Mid_FadeOut(120);
+		BGM_FadeOut(120);
 	}
 
-	if(SystemKey_Data & SYSKEY_BGM_DEVICE) {
+	BGM_UpdateMIDITables();
+
+	if((playing == BGM_PLAYING::MIDI) && (SystemKey_Data & SYSKEY_BGM_DEVICE)) {
 		if(DevChgWait==0){
-			Mid_ChgDev(1);
+			BGM_ChangeMIDIDevice(1);
 			if(MusicRoomText) {
 				MusicRoomText.value().PrerenderMidDev();
 			}
-			Mid_TableInit();
 			DevChgWait = 1;
 		}
 	}
@@ -1429,33 +1433,50 @@ void MusicRoomProc(bool&)
 		DevChgWait = 0;
 	}
 
-	// フェードなどで停止した場合 //
-	if(Mid_Dev.state==MIDST_STOP){
-		Mid_TableInit();
-	}
-
 	if(IsDraw()){
 		GrpCls();
-		src = { 0,   0, 640, 392 };
-		GrpBlt(&src, 0, 0, GrMusic);
 
-		src = { 0, 392, 640, 432 };
-		GrpBlt(&src, 8, 410, GrMusic);
+		auto BlitBG = [](const PIXEL_LTWH& rect) {
+			PIXEL_LTRB src = rect;
+			GrpBlt(&src, src.left, src.top, GrMusic);
+		};
+
+		auto BlitLegend = [](const PIXEL_LTWH& rect) {
+			PIXEL_LTRB src = (rect + PIXEL_POINT{ 0, 392 });
+			GrpBlt(&src, (8 + rect.left), (410 + rect.top), GrMusic);
+		};
+
+		BlitBG({   0,   0, 504, 392 });	// From keyboard to spectrum analyzer
+		BlitBG({ 504,   0, 136,  59 });	// Down to PASSED TIME
+		BlitBG({ 504, 108, 136, 284 });	// Everything below MIDI DEVICE
+
+		BlitLegend({   0,  0, 176,  40 });	// Left side
+		BlitLegend({ 176, 11, 464,  29 });	// Right side without device key
+
+		if(playing == BGM_PLAYING::MIDI) {
+			BlitBG({ 504, 83, 136, 25 });   	// MIDI DEVICE
+			BlitLegend({ 176, 0, 176, 11 });	// Device change key
+		}
+
 		//GrpDrawSpect(0,480);
 		GrpDrawSpect(352,128);
 		GrpDrawNote();
 
-		m = (Mid_PlayTime/1000)/60;
-		s = (Mid_PlayTime/1000)%60;
+		const auto millis = BGM_PlayTime().count();
+		const auto m = ((millis / 1000) / 60);
+		const auto s = ((millis / 1000) % 60);
 		sprintf(buf,"%02d : %02d",m,s);
 		GrpPut7B(560,40+2+2,buf);
 		//TextOut(hdc,561,40+2,buf,strlen(buf));
 
-		sprintf(buf,"%07d",Mid_PlayTime);
-		GrpPut7B(560,64+2+2,buf);
-		//TextOut(hdc,561,64+2,buf,strlen(buf));
+		if(Mid_Loaded()) {
+			BlitBG({ 504,  59, 136,  24 });	// MIDI TIMER
+			sprintf(buf, "%07lld", Mid_PlayTime.pulse_interpolated);
+			GrpPut7B(560,64+2+2,buf);
+			//TextOut(hdc,561,64+2,buf,strlen(buf));
+		}
 
-		sprintf(buf,"%3d",MidiTempo);
+		sprintf(buf, "%3d", BGM_GetTempo());
 		GrpPut7B(560,112+2+2,buf);
 		//TextOut(hdc,561,112+2,buf,strlen(buf));
 		//SetTextColor(hdc,RGB(255*5/5,255*2/5,255*1/5));
@@ -1463,7 +1484,9 @@ void MusicRoomProc(bool&)
 		if(MusicRoomText) {
 			const auto text = MusicRoomText.value();
 
-			TextObj.Blit({ (540 +  2), ( 96 -  3) }, text.mid_dev);
+			if(playing == BGM_PLAYING::MIDI) {
+				TextObj.Blit({ (540 + 2), (96 - 3) }, text.mid_dev);
+			}
 			TextObj.Blit({  400,       (144 +  2) }, text.title);
 			TextObj.Blit({ (400 - 40), (144 + 30) }, text.comment);
 			TextObj.Blit({ (200 - 50),  460       }, text.version);
@@ -1568,22 +1591,6 @@ void GameDraw(void)
 #else
 	StdStatusOutput();
 #endif
-/*
-	HDC		hdc;
-	char	buf[100];
-	MID_DATA	dat;
-
-	if(DxObj.Back->GetDC(&hdc) == DD_OK){
-		Mid_GetData(&dat);
-		sprintf(buf, "c1 : %I64u", dat.nticks);
-		//sprintf(buf, "timebase : %d", dat.timebase);
-		TextOut(hdc, 0, 0, buf, strlen(buf));
-		//sprintf(buf, "tempo    : %d", dat.tempo);
-		//TextOut(hdc, 0, 30, buf, strlen(buf));
-
-		DxObj.Back->ReleaseDC(hdc);
-	}
-*/
 }
 
 bool IsDraw(void)

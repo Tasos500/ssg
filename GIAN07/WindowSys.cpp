@@ -7,20 +7,23 @@
 #include "LOADER.H"
 #include "FONTUTY.H"
 #include "DirectXUTYs/DD_UTY.H"
+#include "game/enum_flags.h"
+#include "game/snd.h"
 #include "game/ut_math.h"
-#include "platform/snd.h"
 
 
-// Coordinates
-// -----------
+// Constants
+// ---------
 
+constexpr auto CWIN_FONT = GIAN_FONT_ID::SMALL;
+
+constexpr PIXEL_COORD CWIN_ITEM_LEFT = 8;
 constexpr PIXEL_COORD CWIN_ITEM_H = 16;
+constexpr PIXEL_COORD CWIN_MAX_H = ((WINITEM_MAX + 1) * CWIN_ITEM_H);
 
 constexpr PIXEL_COORD FACE_W = 96;
 constexpr PIXEL_COORD FACE_H = 96;
-
-constexpr PIXEL_POINT MSG_TEXT_TOPLEFT = { FACE_W, 8 };
-// -----------
+// ---------
 
 ///// [構造体] /////
 
@@ -28,7 +31,9 @@ constexpr PIXEL_POINT MSG_TEXT_TOPLEFT = { FACE_W, 8 };
 typedef struct tagMSG_WINDOW{
 	WINDOW_LTRB	MaxSize;	// ウィンドウの最終的な大きさ
 	WINDOW_LTRB	NowSize;	// ウィンドウの現在のサイズ
+	PIXEL_POINT	TextTopleft;
 
+	MSG_WINDOW_FLAGS	Flags;
 	GIAN_FONT_ID	FontID;	// 使用するフォント
 	uint8_t	FontDy;	// フォントのＹ増量値
 	uint8_t	State;	// 状態
@@ -40,10 +45,10 @@ typedef struct tagMSG_WINDOW{
 	uint8_t	FaceState;	// 顔の状態
 	uint8_t	FaceTime;	// 顔表示用カウンタ
 
-	std::string_view	Msg[MSG_HEIGHT];	// 表示するメッセージへのポインタ
+	Narrow::string_view	Msg[MSG_HEIGHT];	// 表示するメッセージへのポインタ
 
 	// Contains all text from [Msg], concatenated with '\n'.
-	std::string	Text;
+	Narrow::string	Text;
 
 	std::optional<TEXTRENDER_RECT_ID>	TRR;
 
@@ -84,6 +89,11 @@ uint8_t WINDOW_INFO::MaxItems() const
 	return ret;
 }
 
+void WINDOW_INFO::SetActive(bool active)
+{
+	State = (active ? STATE::REGULAR : STATE::DISABLED);
+}
+
 void WINDOW_SYSTEM::Init(PIXEL_COORD w)
 {
 	W = w;
@@ -94,6 +104,22 @@ void WINDOW_SYSTEM::Init(PIXEL_COORD w)
 	for(auto i = 0; i < max_items; i++) {
 		TRRs[i] = TextObj.Register({ W, CWIN_ITEM_H });
 	}
+}
+
+void WINDOW_SYSTEM::Init(
+	const Narrow::literal title, std::span<WINDOW_INFO> info, PIXEL_COORD w
+)
+{
+	Parent.Title      = title;
+	Parent.Help       = "";	// ここは指定しても意味がない
+	Parent.NumItems   = info.size();
+	Parent.CallBackFn = nullptr;
+
+	assert(info.size() <= WINITEM_MAX);
+	for(size_t i = 0; i < info.size(); i++) {
+		Parent.ItemPtr[i] = &info[i];
+	}
+	Init(w);
 }
 
 void WINDOW_SYSTEM::Open(WINDOW_POINT topleft, int select)
@@ -110,6 +136,17 @@ void WINDOW_SYSTEM::Open(WINDOW_POINT topleft, int select)
 	KeyCount = CWIN_KEYWAIT;
 
 	FirstWait = true;
+}
+
+void WINDOW_SYSTEM::OpenCentered(PIXEL_COORD w, int select)
+{
+	// Shifting it down by 9 pixels avoids the clash with the background image
+	// gradient.
+	WINDOW_POINT topleft = {
+		(320 - (w / 2)),
+		(73 + (CWIN_MAX_H / 2) - (((Parent.NumItems + 1) * CWIN_ITEM_H) / 2))
+	};
+	return Open(topleft, select);
 }
 
 // コマンドウィンドウを１フレーム動作させる //
@@ -147,6 +184,16 @@ void CWinMove(WINDOW_SYSTEM *ws)
 // コマンドウィンドウの描画 //
 void CWinDraw(WINDOW_SYSTEM *ws)
 {
+	struct COLOR_PAIR {
+		RGBA shadow;
+		RGBA text;
+	};
+
+	static constexpr ENUMARRAY<COLOR_PAIR, WINDOW_INFO::STATE> COL = {{
+		COLOR_PAIR{ { 128, 128, 128 }, { 255, 255, 255 } }, // Regular
+		COLOR_PAIR{ { 128, 128, 128 }, { 255, 255,  70 } }, // Highlight
+		COLOR_PAIR{ {  96,  96,  96 }, { 192, 192, 192 } }, // Disabled
+	}};
 	WINDOW_INFO		*p;
 	int				i;
 	HDC				hdc;
@@ -184,22 +231,42 @@ void CWinDraw(WINDOW_SYSTEM *ws)
 	// 文字列の描画 //
 	WINDOW_POINT topleft = { ws->x, ws->y };
 	const auto trr = ws->TRRs[0];
-	const std::string_view str = p->Title;
+	const Narrow::string_view str = p->Title;
 	TextObj.Render(topleft, trr, str, [=](GIAN_TEXTRENDER_SESSION auto& s) {
-		s.SetFont(GIAN_FONT_ID::SMALL);
-		s.Put({ 1, 0 }, str, RGBA{ 128, 128, 128 });
-		s.Put({ 0, 0 }, str, RGBA{ 255, 255, 255 });
+		const auto& col = COL[WINDOW_INFO::STATE::REGULAR];
+		s.SetFont(CWIN_FONT);
+
+		const auto left = ((p->Flags & WINDOW_INFO::FLAGS::CENTER)
+			? TextLayoutXCenter(s, str)
+			: 0
+		);
+		s.Put({ (left + 1), 0 }, str, col.shadow);
+		s.Put({ (left + 0), 0 }, str, col.text);
 	});
 	topleft.y += (CWIN_ITEM_H + 1); // ???
 
 	for(i = 0; i < p->NumItems; i++) {
 		const auto trr = ws->TRRs[1 + i];
-		const std::string_view str = p->ItemPtr[i]->Title;
-		TextObj.Render(topleft, trr, str, [=](GIAN_TEXTRENDER_SESSION auto& s) {
-			s.SetFont(GIAN_FONT_ID::SMALL);
-			s.Put({ (8 + 1), 0 }, str, RGBA{ 128, 128, 128 });
-			s.Put({ (8 + 0), 0 }, str, RGBA{ 255, 255, 255 });
+		auto* item = p->ItemPtr[i];
+		const Narrow::string_view str = item->Title;
+		const Narrow::string_view c = ((item->State == item->StatePrev)
+			? str
+			: ""
+		);
+		TextObj.Render(topleft, trr, c, [=](GIAN_TEXTRENDER_SESSION auto& s) {
+			const auto& col = COL[item->State];
+			s.SetFont(CWIN_FONT);
+
+			// Adding CWIN_ITEM_LEFT to centered text would throw it off-center,
+			// obviously.
+			const auto left = ((item->Flags & WINDOW_INFO::FLAGS::CENTER)
+				? TextLayoutXCenter(s, str)
+				: CWIN_ITEM_LEFT
+			);
+			s.Put({ (left + 1), 0 }, str, col.shadow);
+			s.Put({ (left + 0), 0 }, str, col.text);
 		});
+		item->StatePrev = item->State;
 		topleft.y += CWIN_ITEM_H;
 	}
 }
@@ -216,10 +283,28 @@ bool CWinExitFn(INPUT_BITS key)
 	}
 }
 
-void MWinInit(const WINDOW_LTRB& rc)
+PIXEL_SIZE CWinTextExtent(Narrow::string_view str)
+{
+	return TextObj.TextExtent(GIAN_FONT_ID::SMALL, str);
+}
+
+PIXEL_SIZE CWinItemExtent(Narrow::string_view str)
+{
+	auto ret = CWinTextExtent(str);
+	ret.w += CWIN_ITEM_LEFT;
+	ret.h = CWIN_ITEM_H;
+	return ret;
+}
+
+void MWinInit(const WINDOW_LTRB& rc, MSG_WINDOW_FLAGS flags)
 {
 	MsgWindow.MaxSize = rc;
-	MsgWindow.TRR = TextObj.Register(rc.Size() - MSG_TEXT_TOPLEFT);
+	MsgWindow.Flags = flags;
+	MsgWindow.TextTopleft = {
+		.x = ((flags & MSG_WINDOW_FLAGS::WITH_FACE) ? FACE_W : 8),
+		.y = 8,
+	};
+	MsgWindow.TRR = TextObj.Register(rc.Size() - MsgWindow.TextTopleft);
 }
 
 void MWinOpen(void)
@@ -343,7 +428,7 @@ void MWinDraw(void)
 	// 文字列を表示するのはウィンドウが[FREE]である場合だけ        //
 	// -> こうしないと文字列用 Surface を作成することになるので... //
 	if((MsgWindow.State == MWIN_FREE) && MsgWindow.TRR) {
-		const auto topleft = (WINDOW_POINT{ x, y } + MSG_TEXT_TOPLEFT);
+		const auto topleft = (WINDOW_POINT{ x, y } + MsgWindow.TextTopleft);
 		const auto trr = MsgWindow.TRR.value();
 		const auto& text = MsgWindow.Text;
 		TextObj.Render(topleft, trr, text, [](GIAN_TEXTRENDER_SESSION auto& s) {
@@ -357,11 +442,15 @@ void MWinDraw(void)
 					continue;
 				}
 				const PIXEL_COORD top = (i * MsgWindow.FontDy);
+				const auto left = ((MsgWindow.Flags & MSG_WINDOW_FLAGS::CENTER)
+					? TextLayoutXCenter(s, line)
+					: 0
+				);
 
 				// 灰色で１どっとずらして描画
-				s.Put({ 1, top }, line, RGBA{ 128, 128, 128 });
+				s.Put({ (left + 1), top }, line, RGBA{ 128, 128, 128 });
 				// 白で表示すべき位置に表示
-				s.Put({ 0, top }, line, RGBA{ 255, 255, 255 });
+				s.Put({ (left + 0), top }, line, RGBA{ 255, 255, 255 });
 			}
 		});
 	}
@@ -424,7 +513,7 @@ void MWinDraw(void)
 	}
 }
 
-void MWinMsg(std::string_view s)
+void MWinMsg(Narrow::string_view s)
 {
 	int			Line,i;
 
@@ -448,10 +537,12 @@ void MWinMsg(std::string_view s)
 }
 
 // 顔をセットする //
-void MWinFace(BYTE faceID)
+void MWinFace(uint8_t faceID)
 {
 	if(MsgWindow.State==MWIN_DEAD) return;		// 表示不可
 	if(faceID/FACE_NUMX>=FACE_MAX) return;		// あり得ない数字
+
+	assert(MsgWindow.TextTopleft.x == FACE_W);
 
 	if(MsgWindow.FaceState==MFACE_NONE){
 		MsgWindow.FaceState = MFACE_OPEN;
@@ -467,7 +558,7 @@ void MWinFace(BYTE faceID)
 }
 
 // コマンドを送る //
-void MWinCmd(BYTE cmd)
+void MWinCmd(uint8_t cmd)
 {
 	int		temp,i;
 	int		Ysize = 0;
@@ -550,8 +641,8 @@ static WINDOW_INFO *CWinSearchActive(WINDOW_SYSTEM *ws)
 // キーボード入力を処理する //
 static void CWinKeyEvent(WINDOW_SYSTEM *ws)
 {
-	WINDOW_INFO		*p,*p2;
-	int				Depth;
+	using STATE = WINDOW_INFO::STATE;
+	using FLAGS = WINDOW_INFO::FLAGS;
 
 	if(ws->FirstWait){
 		if(Key_Data) return;
@@ -565,55 +656,81 @@ static void CWinKeyEvent(WINDOW_SYSTEM *ws)
 		return;
 	}
 
+	// アクティブなウィンドウを検索する //
+	auto* p = CWinSearchActive(ws);
+	auto Depth = ws->SelectDepth;
+
+	// アクティブな項目をセットする //
+	auto* p2 = p->ItemPtr[ws->Select[Depth]];
+
+	assert(p2->State != STATE::DISABLED);
+
 	// キーボードの過剰なリピート防止 //
-	switch(ws->OldKey){
-		// 一定間隔でリピートを許可するキー //
-		case(KEY_UP):case(KEY_DOWN):case(KEY_LEFT):case(KEY_RIGHT):
-			if(ws->KeyCount){
-				ws->KeyCount--;
-				if(ws->KeyCount==0) ws->OldKey=0;
-			}
-			else ws->KeyCount = CWIN_KEYWAIT;
+	if(ws->KeyCount) {
+		ws->KeyCount--;
+		if(ws->KeyCount == 0) {
+			ws->OldKey = 0;
+		}
 		return;
-
+	} else if(
+		(p2->Flags & FLAGS::FAST_REPEAT) && CWinOptionKeyDelta(ws->OldKey)
+	) {
+		ws->KeyCount = ws->FastRepeatWait;
+		ws->FastRepeatWait = (std::max)((ws->FastRepeatWait - 2), 0);
+		if(ws->KeyCount == 0) {
+			ws->OldKey = 0;
+		}
+		return;
+	} else if(
+		(ws->OldKey == KEY_UP) || (ws->OldKey == KEY_DOWN) ||
+		(ws->OldKey == KEY_LEFT) || (ws->OldKey == KEY_RIGHT)
+	) {
+		ws->KeyCount = CWIN_KEYWAIT;
+		return;
+	} else if(
+		(ws->OldKey == KEY_TAMA) || (ws->OldKey == KEY_BOMB) ||
+		(ws->OldKey == KEY_RETURN) || (ws->OldKey == KEY_ESC)
+	) {
 		// いかなる場合もリピートを許可しないキー //
-		case(KEY_TAMA):case(KEY_BOMB):case(KEY_RETURN):case(KEY_ESC):
-			if(Key_Data == ws->OldKey) return;
-
-		default:
-			ws->KeyCount = 0;
-		break;
+		if(Key_Data == ws->OldKey) {
+			return;
+		}
+	} else {
+		ws->KeyCount = 0;
 	}
 
 	ws->OldKey = Key_Data;
 
-	// アクティブなウィンドウを検索する //
-	p     = CWinSearchActive(ws);
-	Depth = ws->SelectDepth;
-
 	// 一部のキーボード入力を処理する(KEY_UP/KEY_DOWN) //
 	switch(Key_Data){
-		case(KEY_UP):		// 一つ上の項目へ
-			ws->Select[Depth] = (ws->Select[Depth]+p->NumItems-1)%(p->NumItems);
-			SndPlay(SOUND_ID_SELECT);
-		return;
+		case(KEY_UP): // 一つ上の項目へ
+			do {
+				ws->Select[Depth] = (
+					(ws->Select[Depth] + p->NumItems - 1) % p->NumItems
+				);
+			} while(p->ItemPtr[ws->Select[Depth]]->State == STATE::DISABLED);
+			Snd_SEPlay(SOUND_ID_SELECT);
+			break;
 
-		case(KEY_DOWN):		// 一つ下の項目へ
-			ws->Select[Depth] = (ws->Select[Depth]+1)%(p->NumItems);
-			SndPlay(SOUND_ID_SELECT);
-		return;
+		case(KEY_DOWN): // 一つ下の項目へ
+			do {
+				ws->Select[Depth] = ((ws->Select[Depth] + 1) % p->NumItems);
+			} while(p->ItemPtr[ws->Select[Depth]]->State == STATE::DISABLED);
+			Snd_SEPlay(SOUND_ID_SELECT);
+			break;
 
 		case(KEY_ESC):case(KEY_BOMB):
-			SndPlay(SOUND_ID_CANCEL);
+			Snd_SEPlay(SOUND_ID_CANCEL);
 		break;
 
 		case(KEY_TAMA):case(KEY_RETURN):case(KEY_LEFT):case(KEY_RIGHT):
-			SndPlay(SOUND_ID_SELECT);
+			Snd_SEPlay(SOUND_ID_SELECT);
 		break;
-	}
 
-	// アクティブな項目をセットする //
-	p2 = p->ItemPtr[ws->Select[Depth]];
+		case(0):
+			ws->FastRepeatWait = CWIN_KEYWAIT;
+			break;
+	}
 
 	if(p2->CallBackFn != NULL){
 		// コールバック動作時の処理 //

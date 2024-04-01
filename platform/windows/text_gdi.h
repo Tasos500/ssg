@@ -15,6 +15,10 @@
 // void*.
 #include <windows.h>
 
+PIXEL_SIZE TextGDIExtent(
+	HDC hdc, std::optional<HFONT> font, Narrow::string_view str
+);
+
 // Un-templated session code
 class TEXTRENDER_GDI_SESSION_BASE {
 protected:
@@ -34,9 +38,10 @@ public:
 	HDC hdc;
 
 	void SetColor(const RGBA& color);
+	PIXEL_SIZE Extent(Narrow::string_view str);
 	void Put(
 		const PIXEL_POINT& topleft_rel,
-		std::string_view str,
+		Narrow::string_view str,
 		std::optional<RGBA> color = std::nullopt
 	);
 
@@ -104,6 +109,10 @@ public:
 		surf.size = { 0, 0 };
 	}
 
+	PIXEL_SIZE TextExtent(FontID font, Narrow::string_view str) {
+		return TextGDIExtent(surf.dc, fonts[font], str);
+	}
+
 	bool Prerender(
 		TEXTRENDER_RECT_ID rect_id,
 		TEXTRENDER_SESSION_FUNC<SESSION, FontID> auto func
@@ -131,7 +140,7 @@ public:
 	bool Render(
 		WINDOW_POINT dst,
 		TEXTRENDER_RECT_ID rect_id,
-		std::string_view contents,
+		Narrow::string_view contents,
 		TEXTRENDER_SESSION_FUNC<SESSION, FontID> auto func,
 		std::optional<PIXEL_LTWH> subrect = std::nullopt
 	) {

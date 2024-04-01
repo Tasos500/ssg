@@ -5,7 +5,9 @@
 
 #include "MUSIC.H"
 #include "FONTUTY.H"
-#include "DirectXUTYs/PBGMIDI.H"
+#include "game/bgm.h"
+#include "game/string_format.h"
+#include "platform/midi_backend.h"
 
 std::optional<MUSICROOM_TEXT> MusicRoomText;
 
@@ -34,11 +36,14 @@ MUSICROOM_TEXT MUSICROOM_TEXT::Register()
 void MUSICROOM_TEXT::PrerenderMidDev() const
 {
 	TextObj.Prerender(mid_dev, [](GIAN_TEXTRENDER_SESSION auto& s) {
-		const char* dev = Mid_Dev.name[Mid_Dev.NowID];
-
+		const auto maybe_dev = MidBackend_DeviceName();
+		if(!maybe_dev) {
+			return;
+		}
+		const auto dev = maybe_dev.value();
 		s.SetFont(GIAN_FONT_ID::SMALL);
 		s.SetColor(ColorDefault);
-		s.Put({ 0, 0 }, { dev, (std::min)(strlen(dev), 13u) });
+		s.Put({ 0, 0 }, { dev.data(), (std::min)(dev.size(), 13u) });
 	});
 }
 
@@ -49,27 +54,38 @@ bool MUSICROOM_TEXT::PrerenderTitleAndComment(
 	struct LINE {
 		char c[19 * 2];
 
-		operator std::string_view() const {
+		operator Narrow::string_view() const {
 			return { c, sizeof(c) };
 		}
 	};
 
 	auto cursor = buffer.cursor();
 	TextObj.Prerender(title, [&](GIAN_TEXTRENDER_SESSION auto& s) {
-		const auto maybe_title = cursor.next<LINE>();
-		if(!maybe_title) {
-			return;
-		}
-		const auto& title = maybe_title.value()[0];
+		// Skip the title in the comment and take it from the BGM instead.
+		cursor.next<LINE>();
 
-		char buf[4 + sizeof(title.c) + 1];
-		sprintf(buf, "#%02d %.26s", (number + 1), title.c);
+		const auto& title = BGM_Title();
+		Narrow::string buf;
+		const auto len = (
+			1 + STRING_NUM_CAP<decltype(number)> + 1 + title.size()
+		);
+		buf.resize_and_overwrite(len, [&](decltype(buf)::value_type* p, auto) {
+			const auto* start = p;
+			*(p++) = '#';
+			p = StringCopyNum<2>((number + 1), p);
+			*(p++) = ' ';
+			p = std::ranges::copy(title, p).out;
+			return (p - start);
+		});
 		s.SetFont(GIAN_FONT_ID::NORMAL);
 		s.Put({ 1, 0 }, buf, ColorHighlight);
 		s.Put({ 0, 0 }, buf, ColorDefault);
 	});
 
 	TextObj.Prerender(comment, [&cursor](GIAN_TEXTRENDER_SESSION auto& s) {
+		if(!BGM_LoadedOriginalMIDI()) {
+			return;
+		}
 		int y = 0;
 		s.SetFont(GIAN_FONT_ID::SMALL);
 		s.SetColor(ColorDefault);

@@ -68,42 +68,194 @@
 ///// [構造体] /////
 
 // 子ウィンドウの情報 //
-typedef struct tagWINDOW_INFO{
-	const char		*Title;			// タイトル文字列へのポインタ(実体ではない！)
-	const char		*Help;			// ヘルプ文字列へのポインタ(これも実体ではない)
+struct WINDOW_INFO {
+	enum class STATE : uint8_t {
+		REGULAR = 0,
+		HIGHLIGHT = 1,
+		DISABLED = 2,
+		COUNT,
+	};
+
+	enum class FLAGS : uint8_t {
+		_HAS_BITFLAG_OPERATORS,
+		NONE = 0x00,
+
+		// Shortens the key repeat times for option items.
+		FAST_REPEAT = 0x01,
+
+		// Horizontally centered text.
+		CENTER = 0x02,
+	};
+
+	Narrow::literal	Title;	// タイトル文字列へのポインタ(実体ではない！)
+	Narrow::literal	Help;	// ヘルプ文字列へのポインタ(これも実体ではない)
 
 	// 特殊処理用コールバック関数(未使用ならNULL)
 	bool	(*CallBackFn)(INPUT_BITS);
 
-	BYTE			NumItems;				// 項目数(<ITEM_MAX)
-	tagWINDOW_INFO	*ItemPtr[WINITEM_MAX];	// 次の項目へのポインタ
+	STATE	State = STATE::REGULAR;
+
+	// Required for forcing the item to be re-rendered after a state change.
+	STATE	StatePrev = STATE::COUNT;
+
+	FLAGS	Flags = FLAGS::NONE;
+
+	uint8_t	NumItems;	// 項目数(<ITEM_MAX)
+	WINDOW_INFO*	ItemPtr[WINITEM_MAX];	// 次の項目へのポインタ
+
+	constexpr WINDOW_INFO(
+		const Narrow::literal title = "",
+		const Narrow::literal help = "",
+		decltype(CallBackFn) callback_fn = nullptr,
+		FLAGS flags = FLAGS::NONE
+	) :
+		Title(title),
+		Help(help),
+		CallBackFn(callback_fn),
+		NumItems(0),
+		Flags(flags)
+	{
+		if(!callback_fn) {
+			State = STATE::DISABLED;
+		}
+	}
+
+	constexpr WINDOW_INFO(
+		const Narrow::literal title,
+		const Narrow::literal help,
+		std::span<WINDOW_INFO> children
+	) :
+		Title(title), Help(help), CallBackFn(nullptr), NumItems(children.size())
+	{
+		for(size_t i = 0; auto& item : children) {
+			ItemPtr[i++] = &item;
+		}
+	}
 
 	// Returns the maximum number of items among all submenus.
 	uint8_t MaxItems() const;
-} WINDOW_INFO;
+
+	void SetActive(bool active);
+};
 
 // ウィンドウ群 //
 typedef struct tagWINDOW_SYSTEM{
 	WINDOW_INFO		Parent;					// 親ウィンドウ
 	int				x,y;					// ウィンドウ左上の座標
 	PIXEL_COORD	W;
-	DWORD			Count;					// フレームカウンタ
-	BYTE			Select[WINDOW_DEPTH];	// 選択中の項目スタック
-	BYTE			SelectDepth;			// 選択中の項目に対するＳＰ
-	BYTE			State;					// 状態
+	uint32_t	Count;	// フレームカウンタ
+	uint8_t	Select[WINDOW_DEPTH];	// 選択中の項目スタック
+	uint8_t	SelectDepth;	// 選択中の項目に対するＳＰ
+	uint8_t	State;	// 状態
 
 	INPUT_BITS	OldKey;	// 前に押されていたキー
-	BYTE			KeyCount;				// キーボードウェイト
-	BOOL			FirstWait;				// 最初のキー解放待ち
+	uint8_t	KeyCount;	// キーボードウェイト
+	uint8_t	FastRepeatWait;	// Current wait time for FAST_REPEAT items
+	bool	FirstWait;	// 最初のキー解放待ち
 
 	TEXTRENDER_RECT_ID	TRRs[1 + WINITEM_MAX]; // Initialized by Init().
 
 	// Prepares text rendering for a window with the given width.
 	void Init(PIXEL_COORD w);
 
+	// Initializes [Parent] using the given title and info span, and prepares
+	// text rendering for a window with the given width.
+	void Init(
+		const Narrow::literal title,
+		std::span<WINDOW_INFO> info,
+		PIXEL_COORD w
+	);
+
 	// コマンドウィンドウの初期化 //
 	void Open(WINDOW_POINT topleft, int select);
+
+	void OpenCentered(PIXEL_COORD w, int select);
 } WINDOW_SYSTEM;
+
+
+
+// Turns [Sys] into a vertically scrolling window, with elements generated on
+// the fly.
+// Unfortunately has to be a template because [WINDOW_SYSTEM::CallBackFn]
+// doesn't take a reference to a window system object.
+template <
+	WINDOW_SYSTEM& Sys,
+	size_t (*ListSize)(),
+	void (*Generate)(WINDOW_INFO& ret, size_t generated, size_t selected),
+	bool (*Handle)(INPUT_BITS key, size_t selected)
+> class WINDOW_SCROLL {
+	// Rewritten when scrolling.
+	static inline WINDOW_INFO Item[WINITEM_MAX] = {};
+
+	static inline size_t Sel = 0;
+	static inline WINDOW_SYSTEM* ReturnTo = nullptr;
+
+	static void Scroll(void)
+	{
+		const auto total = ListSize();
+		const auto visible = Sys.Parent.NumItems;
+		const auto visible_half = (Sys.Parent.NumItems / 2);
+		size_t generated_i = (
+			(Sel < visible_half) ? 0 :
+			(Sel >= (total - visible_half)) ? (total - visible) :
+			(Sel - visible_half)
+		);
+		for(auto item_i = decltype(visible){0}; item_i < visible; item_i++) {
+			Item[item_i].CallBackFn = Fn;
+			Generate(Item[item_i], generated_i, Sel);
+			if(generated_i == Sel) {
+				Sys.Select[0] = item_i;
+			}
+			generated_i++;
+		}
+	}
+
+	static bool Fn(INPUT_BITS key)
+	{
+		if(key == KEY_UP) {
+			if(Sel == 0) {
+				Sel = ListSize();
+			}
+			Sel--;
+			Scroll();
+		} else if(key == KEY_DOWN) {
+			Sel++;
+			if(Sel >= ListSize()) {
+				Sel = 0;
+			}
+			Scroll();
+		} else if((key == KEY_BOMB) || (key == KEY_ESC)) {
+			Sys.State = CWIN_DEAD;
+			if(ReturnTo) {
+				ReturnTo->OldKey = key;
+			}
+			return false;
+		}
+		return Handle(key, Sel);
+	}
+
+public:
+	static void Init(
+		const Narrow::literal title,
+		size_t sel,
+		PIXEL_COORD w,
+		WINDOW_SYSTEM* return_to
+	)
+	{
+		assert(sel < ListSize());
+
+		ReturnTo = return_to;
+		Sys.Parent.Title = title;
+		Sys.Parent.Help = "";
+		Sys.Parent.NumItems = (std::min)(ListSize(), size_t{ WINITEM_MAX });
+		Sys.Parent.CallBackFn = Fn;
+		for(size_t i = 0; i < Sys.Parent.NumItems; i++) {
+			Sys.Parent.ItemPtr[i] = &Item[i];
+		}
+		Scroll();
+		Sys.Init(w);
+	}
+};
 
 
 
@@ -114,11 +266,53 @@ void CWinMove(WINDOW_SYSTEM *ws);				// コマンドウィンドウを１フレ�
 void CWinDraw(WINDOW_SYSTEM *ws);				// コマンドウィンドウの描画
 bool CWinExitFn(INPUT_BITS key);	// コマンド [Exit] のデフォルト処理関数
 
+// Returns the delta that this key would apply to a numeric option value.
+constexpr int_fast8_t CWinOptionKeyDelta(INPUT_BITS key)
+{
+	return (
+		((key == KEY_RETURN) || (key == KEY_TAMA) || (key == KEY_RIGHT)) ? 1 :
+		(key == KEY_LEFT) ? -1 :
+		0
+	);
+}
+
+// Calculates the rendered width of the given text in the menu item font,
+// without any padding.
+PIXEL_SIZE CWinTextExtent(Narrow::string_view str);
+
+// Calculates the rendered width of a whole padded menu item with the given
+// text.
+PIXEL_SIZE CWinItemExtent(Narrow::string_view str);
+
+template <typename ChoiceFunc> static bool OptionFN(
+	INPUT_BITS key, void setitem(void), ChoiceFunc on_return_tama_right_left
+)
+{
+	// It's a menu, we don't care about performance, and switch tables with
+	// these constants add an entire 256-byte table to every function on
+	// modern compilers, even in Release builds.
+	if((key == KEY_BOMB) || (key == KEY_ESC)) {
+		return false;
+	} else if(CWinOptionKeyDelta(key)) {
+		on_return_tama_right_left();
+	}
+	setitem();
+	return true;
+}
 
 // メッセージウィンドウ処理 //
 
+enum class MSG_WINDOW_FLAGS : uint8_t {
+	NONE = 0x0,
+	WITH_FACE = 0x1,	// Pads all text to leave room for a face portrait.
+	CENTER = 0x2,	// Horizontally centers all text.
+	_HAS_BITFLAG_OPERATORS,
+};
+
 // Prepares text rendering for a window with the given dimensions.
-void MWinInit(const WINDOW_LTRB& rc);
+void MWinInit(
+	const WINDOW_LTRB& rc, MSG_WINDOW_FLAGS flags = MSG_WINDOW_FLAGS::NONE
+);
 
 void MWinOpen(void);	// メッセージウィンドウをオープンする
 void MWinClose(void);			// メッセージウィンドウをクローズする
@@ -126,9 +320,9 @@ void MWinForceClose(void);		// メッセージウィンドウを強制クロー�
 void MWinMove(void);			// メッセージウィンドウを動作させる(後で上と統合する)
 void MWinDraw(void);			// メッセージウィンドウを描画する(上に同じ)
 
-void MWinMsg(std::string_view str);	// メッセージ文字列を送る
-void MWinFace(BYTE faceID);		// 顔をセットする
-void MWinCmd(BYTE cmd);			// コマンドを送る
+void MWinMsg(Narrow::string_view str);	// メッセージ文字列を送る
+void MWinFace(uint8_t faceID);	// 顔をセットする
+void MWinCmd(uint8_t cmd);	// コマンドを送る
 
 void MWinHelp(WINDOW_SYSTEM *ws);		// メッセージウィンドウにヘルプ文字列を送る
 

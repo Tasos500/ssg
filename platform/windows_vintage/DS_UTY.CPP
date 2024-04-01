@@ -7,7 +7,7 @@
 
 #include <dsound.h>
 #include "platform/file.h"
-#include "platform/snd.h"
+#include "platform/snd_backend.h"
 #include "DirectXUTYs/DX_ERROR.H"	// エラー処理用関数
 #pragma message("DS_UTY : Version 0.03 : Update 2000/02/04")
 
@@ -98,43 +98,45 @@ bool SndFillBuffer(IDirectSoundBuffer *ds, uint8_t *data, size_t size);
 // サウンド停止用補助関数 //
 static void _Snd_Stop(LPSE_STRUCT se,int no);
 
+static LONG DS_Volume(VOLUME discrete)
+{
+	const auto db = VolumeDBSquare(VolumeLinear(discrete));
+	const LONG ds_db = (db * (-DSBVOLUME_MIN / 100));
+	constexpr LONG MIN = DSBVOLUME_MIN;
+	constexpr LONG MAX = DSBVOLUME_MAX;
+	return (std::min)((std::max)(ds_db, MIN), MAX);
+}
+
 LPDIRECTSOUND			Snd_DS = NULL;
 LPSE_STRUCT				Snd_OBJ[SND_OBJ_MAX];
 
 
-bool SndInit(void)
+bool SndBackend_Init(void)
 {
 	HRESULT		dsrval;
 
-	try{
-		dsrval = DirectSoundCreate(NULL,&Snd_DS,NULL);
-		if(dsrval != DS_OK) throw("DirectSoundCreate に失敗");
-
-		extern HWND hWndMain;
-		dsrval = Snd_DS->SetCooperativeLevel(hWndMain, DSSCL_NORMAL);
-		if(dsrval != DS_OK) throw("SetCooperativeLevel(DSound) に失敗");
-	}
-	catch(char *error){
+	const auto fail = [](std::u8string_view error) {
 		DebugOut(error);
-		SndCleanup();
-		return FALSE;
+		SndBackend_Cleanup();
+		return false;
+	};
+
+	dsrval = DirectSoundCreate(nullptr, &Snd_DS, nullptr);
+	if(dsrval != DS_OK) {
+		return fail(u8"DirectSoundCreate に失敗");
+	}
+
+	extern HWND hWndMain;
+	dsrval = Snd_DS->SetCooperativeLevel(hWndMain, DSSCL_NORMAL);
+	if(dsrval != DS_OK) {
+		return fail(u8"SetCooperativeLevel(DSound) に失敗");
 	}
 
 	return TRUE;
 }
 
-void SndCleanup(void)
+void SndBackend_Cleanup(void)
 {
-	int		i;
-
-	// ここで SE_STRUCT 関連の解放を行う //
-	for(i=0;i<SND_OBJ_MAX;i++){
-		SndRelease(i);
-	}
-
-	// 念のため... //
-	for(i=0;i<SND_OBJ_MAX;i++) Snd_OBJ[i] = NULL;
-
 	// ＤＳオブジェクトを解放 //
 	if(Snd_DS) {
 		Snd_DS->Release();
@@ -142,8 +144,73 @@ void SndCleanup(void)
 	}
 }
 
+bool SndBackend_BGMInit(void)
+{
+	return false;
+}
+
+void SndBackend_BGMCleanup(void)
+{
+}
+
+bool SndBackend_SEInit(void)
+{
+	return true;
+}
+
+void SndBackend_SECleanup(void)
+{
+	// ここで SE_STRUCT 関連の解放を行う //
+	for(auto i = 0; i < SND_OBJ_MAX; i++) {
+		SndRelease(i);
+		// 念のため... //
+		Snd_OBJ[i] = nullptr;
+	}
+}
+
+bool SndBackend_BGMLoad(std::shared_ptr<BGM::TRACK> track)
+{
+	return false;
+}
+
+void SndBackend_BGMPlay(void)
+{
+}
+
+void SndBackend_BGMStop(void)
+{
+}
+
+std::chrono::milliseconds SndBackend_BGMPlayTime(void)
+{
+	return std::chrono::milliseconds::zero();
+}
+
+void SndBackend_BGMUpdateVolume(void)
+{
+}
+
+void SndBackend_BGMUpdateTempo(void)
+{
+}
+
+void SndBackend_SEUpdateVolume(void)
+{
+	const auto ds_volume = DS_Volume(Snd_VolumeSE);
+	for(const auto* se : Snd_OBJ) {
+		if(!se) {
+			continue;
+		}
+		for(decltype(se->max) i = 0; i < se->max; i++) {
+			se->buf[i]->SetVolume(ds_volume);
+		}
+	}
+}
+
 // ＷＡＶファイルロード(ある制限があるが...) //
-bool SndWAVLoad(BYTE_BUFFER_OWNED buffer, uint8_t id, SND_INSTANCE_ID max)
+bool SndBackend_SELoad(
+	BYTE_BUFFER_OWNED buffer, uint8_t id, SND_INSTANCE_ID max
+)
 {
 	LPSE_STRUCT		p;
 	HRESULT			dsrval;
@@ -204,12 +271,12 @@ bool SndWAVLoad(BYTE_BUFFER_OWNED buffer, uint8_t id, SND_INSTANCE_ID max)
 
 	dsrval = Snd_DS->CreateSoundBuffer(&dsBD,&p->buf[0],NULL);
 	if(dsrval != DS_OK){
-		DebugOut("CreateSoundBuffer に失敗");
+		DebugOut(u8"CreateSoundBuffer に失敗");
 		return FALSE;
 	}
 
 	if(!SndFillBuffer(p->buf[0],p->data,p->size)){
-		DebugOut("SndFillBuffer に失敗 (PBGUTY_X.LIB)");
+		DebugOut(u8"SndFillBuffer に失敗 (PBGUTY_X.LIB)");
 		return FALSE;
 	}
 
@@ -223,7 +290,7 @@ bool SndWAVLoad(BYTE_BUFFER_OWNED buffer, uint8_t id, SND_INSTANCE_ID max)
 	return TRUE;
 }
 
-void SndPlay(uint8_t id, int x, bool loop)
+void SndBackend_SEPlay(uint8_t id, int x, bool loop)
 {
 	HRESULT	dsrval;
 	DWORD	st;
@@ -244,7 +311,7 @@ void SndPlay(uint8_t id, int x, bool loop)
 	se->now = (se->now+1)%(se->max);
 }
 
-void SndStop(uint8_t id)
+void SndBackend_SEStop(uint8_t id)
 {
 	int i;
 	LPSE_STRUCT se;
@@ -265,10 +332,10 @@ void SndStop(uint8_t id)
 // buffers as the window loses and regains focus. This behavior can be changed
 // by setting the DSBCAPS_GLOBALFOCUS flag on a buffer, but none of our buffers
 // do so yet.
-void SndPauseAll()
+void SndBackend_PauseAll()
 {
 }
-void SndResumeAll()
+void SndBackend_ResumeAll()
 {
 }
 

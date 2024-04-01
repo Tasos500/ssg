@@ -6,9 +6,12 @@
 #pragma once
 
 #include "LEVEL.H"
-#include "DirectXUTYs/DD_UTY.H"
+#include "game/endian.h"
 #include "game/input.h"
+#include "game/pixelformat.h"
+#include "game/volume.h"
 #include "platform/buffer.h"
+#include "platform/unicode.h"
 
 // フラグ //
 constexpr uint8_t GRPF_MASK	= (~0x07);
@@ -16,9 +19,13 @@ constexpr uint8_t GRPF_ALPHA_ENABLE	= 0x01;	// 半透明が有効(無効時は�
 constexpr uint8_t GRPF_WINDOW_UPPER	= 0x02;	// メッセージウィンドウを上の方に表示する
 constexpr uint8_t GRPF_MSG_DISABLE	= 0x04;	// 会話シーンを省略
 
-constexpr uint8_t SNDF_MASK	= (~0x03);
-constexpr uint8_t SNDF_MIDI_ENABLE	= 0x01;	// ＭＩＤＩが有効
-constexpr uint8_t SNDF_WAVE_ENABLE	= 0x02;	// ＷＡＶＥが有効
+constexpr uint8_t SNDF_MASK	= (~0x07);
+constexpr uint8_t SNDF_BGM_ENABLE	= 0x01;
+constexpr uint8_t SNDF_SE_ENABLE	= 0x02;
+
+// Normalizing the volume should be the default, so we need to store the
+// negation for backwards compatibility.
+constexpr uint8_t SNDF_BGM_NOT_VOL_NORM	= 0x04;
 
 constexpr uint8_t INPF_MASK	= (~0x07);
 constexpr uint8_t INPF_JOYPAD_ENABLE	= 0x01;	// パッドが有効
@@ -58,7 +65,13 @@ template <typename T> concept CONFIG_OPTION = requires(
 	{ t.Write(cursor_write) } -> std::same_as<bool>;
 };
 
-constexpr auto ValidateAlways = [](auto v) { return true; };
+bool ValidateAlways(auto v) { return true; };
+template <typename T, T Max> constexpr bool ValidateBelow(T v) {
+	return (v <= Max);
+}
+template <uint8_t Mask> constexpr bool ValidateFlag(uint8_t v) {
+	return !(v & Mask);
+}
 
 // Option class, with optional validation of the value against a supported
 // static range.
@@ -102,24 +115,68 @@ template <
 	}
 };
 
+struct CONFIG_OPTION_UTF8 {
+	std::u8string v;
+
+	const size_t Size() const {
+		return (sizeof(U32BE) + (v.size() * sizeof(decltype(v)::value_type)));
+	}
+
+	bool Read(BYTE_BUFFER_CURSOR<const uint8_t>& cursor) {
+		const auto maybe_len = cursor.next<U32BE>();
+		if(!maybe_len) {
+			return false;
+		}
+		const auto len = maybe_len.value()[0];
+		const auto maybe_bytes = cursor.next<decltype(v)::value_type>(len);
+		if(!maybe_bytes) {
+			return false;
+		}
+		const auto bytes = maybe_bytes.value();
+		v.resize_and_overwrite(len, [bytes](auto buf, size_t n) {
+			std::ranges::copy(bytes, buf);
+			return n;
+		});
+		return true;
+	}
+
+	bool Write(BYTE_BUFFER_CURSOR<uint8_t>& cursor) {
+		if(v.size() > (std::numeric_limits<uint32_t>::max)()) {
+			return false;
+		}
+		auto maybe_len = cursor.next<U32BE>();
+		if(!maybe_len) {
+			return false;
+		}
+		maybe_len.value()[0] = static_cast<U32BE>(v.size());
+		const auto maybe_bytes = cursor.next<decltype(v)::value_type>(v.size());
+		if(!maybe_bytes) {
+			return false;
+		}
+		const auto bytes = maybe_bytes.value();
+		std::ranges::copy(v, bytes.data());
+		return true;
+	}
+};
+
 // オプション保持用構造体 //
 typedef struct tagCONFIG_DATA{
 	template <
 		typename T, bool (*Validate)(T) = ValidateAlways
 	> using OPTION = CONFIG_OPTION_VALUE<T, Validate>;
 
-	template <typename T, T Max> using OPTION_BELOW = OPTION<T, [](auto v) {
-		return (v <= Max);
-	}>;
-
+	template <typename T, T Max> using OPTION_BELOW = OPTION<
+		T, ValidateBelow<T, Max>
+	>;
 	template <uint8_t Max> using OPTION_U8_BELOW = OPTION_BELOW<uint8_t, Max>;
-
-	template <uint8_t Mask> using OPTION_FLAGS = OPTION<uint8_t, [](auto v) {
-		return !(v & Mask);
-	}>;
+	template <uint8_t Mask> using OPTION_FLAGS = OPTION<
+		uint8_t, ValidateFlag<Mask>
+	>;
 
 	// 32 is the WinMM joy button limit //
 	using OPTION_WINMM_PAD = OPTION_BELOW<INPUT_PAD_BUTTON, 32>;
+
+	using OPTION_UTF8 = CONFIG_OPTION_UTF8;
 
 	// 難易度関連 //
 	// ---------- //
@@ -145,10 +202,11 @@ typedef struct tagCONFIG_DATA{
 	// グラフィックに関するフラグ
 	OPTION_FLAGS<GRPF_MASK> GraphFlags = { 0 };
 
-	// サウンド・ＭＩＤＩ関連 //
-	OPTION_FLAGS<SNDF_MASK> SoundFlags = {
-		(SNDF_WAVE_ENABLE | SNDF_MIDI_ENABLE)
-	};
+	// サウンド・ＢＧＭ関連 //
+	OPTION_FLAGS<SNDF_MASK> SoundFlags = { (SNDF_SE_ENABLE | SNDF_BGM_ENABLE) };
+	OPTION_BELOW<VOLUME, VOLUME_MAX> SEVolume  = { (VOLUME_MAX * 4) / 10 };
+	OPTION_BELOW<VOLUME, VOLUME_MAX> BGMVolume = { (VOLUME_MAX * 4) / 10 };
+	OPTION_UTF8 BGMPack;
 
 	// 入力に関するフラグ
 	OPTION_FLAGS<INPF_MASK> InputFlags = { INPF_Z_MSKIP_ENABLE };

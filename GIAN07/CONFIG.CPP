@@ -5,8 +5,9 @@
 
 #pragma once
 
-#include "platform/file.h"
 #include "CONFIG.H"
+#include "game/bgm.h"
+#include "platform/file.h"
 
 ///// Constants /////
 constexpr auto DBG_FN = _PATH("秋霜DBG.DAT");
@@ -64,6 +65,10 @@ const struct VERSION_ORIGINAL {
 	// re-locking the Extra Stage even if the checksum was correct.
 	static inline CONFIG_OPTION_VALUE<BITDEPTH> BitDepth8Or16;
 
+	// The original build of the game only supported the MIDI and WAVE activity
+	// bits.
+	static inline CONFIG_OPTION_VALUE<uint8_t> SoundFlags;
+
 	static inline CONFIG_OPTION_VALUE<uint32_t> CheckSum;
 	static inline CONFIG_OPTION_VALUE<uint8_t> PaddingByte;
 
@@ -75,7 +80,7 @@ const struct VERSION_ORIGINAL {
 		BitDepth8Or16,
 		ConfigDat.FPSDivisor,
 		ConfigDat.GraphFlags,
-		ConfigDat.SoundFlags,
+		SoundFlags,
 		ConfigDat.InputFlags,
 		ConfigDat.DebugFlags,
 		ConfigDat.PadTama,
@@ -137,8 +142,20 @@ const struct VERSION_00 {
 	};
 } VERSION_00;
 
+const struct VERSION_01 {
+	static constexpr auto FN = _PATH("SSG_V01.CFG");
+
+	static constexpr CONFIG_OPTION_ARRAY Options = {
+		VERSION_00.Options,
+		ConfigDat.SEVolume,
+		ConfigDat.BGMVolume,
+		ConfigDat.BGMPack,
+	};
+} VERSION_01;
+
 // Must be sorted from the newest to the oldest version.
 const auto VERSIONS = std::make_tuple(
+	VERSION_01,
 	VERSION_00,
 	VERSION_ORIGINAL
 );
@@ -166,14 +183,14 @@ CONFIG_DATA ConfigDat;
 #ifdef PBG_DEBUG
 static void DebugInit(void)
 {
-	const auto maybe_loaded = FileLoad<DEBUG_DATA>(DBG_FN);
-	if(!maybe_loaded) {
+	const auto loaded_bytes = FileLoadInplace(
+		{ reinterpret_cast<uint8_t *>(&DebugDat), sizeof(DebugDat) }, DBG_FN
+	);
+	if(loaded_bytes != sizeof(DebugDat)) {
 		DebugDat.Hit        = true;
 		DebugDat.MsgDisplay = true;
 		DebugDat.DemoSave   = false;
 		DebugDat.StgSelect  = 1;
-	} else {
-		DebugDat = maybe_loaded.value();
 	}
 }
 #endif
@@ -202,13 +219,18 @@ extern void ConfigSave(void)
 		? BITDEPTHS::find_if([](auto bpp) { return (bpp == 16); })
 		: ConfigDat.BitDepth.v
 	);
+	VERSION_ORIGINAL.SoundFlags.v  = (ConfigDat.SoundFlags.v & SNDF_SE_ENABLE);
+	VERSION_ORIGINAL.SoundFlags.v |= (BGM_Enabled() * SNDF_BGM_ENABLE);
 	VERSION_ORIGINAL.CheckSum.v = VERSION_ORIGINAL.CheckSumCalculate();
+
+	ConfigDat.SoundFlags.v = VERSION_ORIGINAL.SoundFlags.v;
+	ConfigDat.SoundFlags.v |= (!BGM_GainApply() * SNDF_BGM_NOT_VOL_NORM);
 
 	std::apply([](const auto&... version) {
 		(..., VersionSave(version));
 	}, VERSIONS);
 
 #ifdef PBG_DEBUG
-	FileWrite(DBG_FN, DebugDat);
+	FileWrite(DBG_FN, std::span(&DebugDat, 1));
 #endif
 }
