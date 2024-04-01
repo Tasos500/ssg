@@ -242,7 +242,7 @@ extern void StateDraw(void)
 	GrpPut57(128 + 95,16 + 91-80,buf);
 
 	// 得点表示 //
-	sprintf(buf,"%9d",Viv.score);
+	sprintf(buf,"%lld",Viv.score);
 	GrpPut16c(128,0,buf);
 
 	// 仮の残機＆残りボム表示 //
@@ -353,7 +353,7 @@ extern void MaidMove(void)
 	if (Viv.tamahit){
 		if (Viv.deathbomb == VIVBOMBTIMER_VAL){
 			fragment_set(Viv.x,Viv.y,FRG_FATCIRCLE);
-			SndPlay(SOUND_ID_DEAD);
+			Snd_SEPlay(SOUND_ID_DEAD);
 		}
 		Viv.deathbomb--;
 		if (Viv.deathbomb <= 0){
@@ -454,7 +454,6 @@ extern void MaidDead(void)
 	for(i=0; i<50; i++)
 		fragment_set(Viv.x,Viv.y,FRG_HEART);
 
-	Snd_SEPlay(SOUND_ID_DEAD);
 
 	// 座標系セット //
 	Viv.x         = Viv.opx = SX_START;
